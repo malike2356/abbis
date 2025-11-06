@@ -73,3 +73,8 @@ webalizer/*
 # Sources (if contains generated files)
 sources/*.zip
 sources/*.tar.gz
+
+# Sensitive files with tokens/credentials
+push-to-github.sh
+PUSH_NOW.md
+.github/PUSH_INSTRUCTIONS.md

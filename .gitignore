@@ -1,0 +1,75 @@
+# ABBIS .gitignore
+
+# Environment and config
+.env
+.env.local
+config/database.php
+config/local.php
+
+# Storage and logs
+storage/logs/*
+!storage/logs/.gitkeep
+storage/cache/*
+!storage/cache/.gitkeep
+storage/temp/*
+!storage/temp/.gitkeep
+logs/*
+*.log
+
+# Uploads (keep structure, ignore content)
+uploads/logos/*
+!uploads/logos/.gitkeep
+uploads/media/*
+!uploads/media/.gitkeep
+uploads/payslips/*
+!uploads/payslips/.gitkeep
+uploads/products/*
+!uploads/products/.gitkeep
+uploads/qrcodes/*
+!uploads/qrcodes/.gitkeep
+uploads/site/*
+!uploads/site/.gitkeep
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Composer
+/vendor/
+composer.lock
+
+# Node modules (if any)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# System files
+.htaccess.bak
+.htpasswd
+
+# CMS specific
+cms/public/uploads/*
+!cms/public/uploads/.gitkeep
+
+# Dashboard assets (if large)
+dashboard/images/*
+!dashboard/images/.gitkeep
+
+# Webalizer
+webalizer/*
+
+# Sources (if contains generated files)
+sources/*.zip
+sources/*.tar.gz

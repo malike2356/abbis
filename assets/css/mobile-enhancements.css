@@ -1,0 +1,159 @@
+/**
+ * Mobile Responsiveness Enhancements
+ * Additional styles for better mobile experience
+ */
+
+/* Touch-friendly controls */
+@media (max-width: 768px) {
+    /* Larger touch targets */
+    .btn, button, a.btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 12px 16px;
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+    
+    /* Table improvements */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    table {
+        font-size: 14px;
+    }
+    
+    th, td {
+        padding: 12px 8px;
+        white-space: nowrap;
+    }
+    
+    /* Form improvements */
+    input, select, textarea {
+        font-size: 16px; /* Prevents zoom on iOS */
+        padding: 12px;
+        min-height: 44px;
+    }
+    
+    /* Card improvements */
+    .dashboard-card, .kpi-card {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    
+    /* Grid improvements */
+    .metric-grid, .stats-grid, .dashboard-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+    
+    /* KPI Hero Grid */
+    .kpi-hero-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+    
+    /* Chart containers */
+    .chart-container {
+        padding: 16px;
+        min-height: 300px;
+    }
+    
+    canvas {
+        max-width: 100%;
+        height: auto !important;
+    }
+    
+    /* Modal improvements */
+    .modal-content {
+        width: 95% !important;
+        max-width: 95% !important;
+        margin: 10px auto;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    
+    /* Navigation improvements */
+    .header-content {
+        flex-wrap: wrap;
+    }
+    
+    .nav-menu {
+        width: 100%;
+        order: 3;
+    }
+    
+    /* Export buttons */
+    .export-buttons {
+        flex-wrap: wrap;
+        margin-top: 8px;
+    }
+    
+    .export-buttons .btn {
+        font-size: 12px;
+        padding: 8px 12px;
+    }
+    
+    /* Action dropdowns */
+    .action-dropdown-menu {
+        position: fixed !important;
+        left: 10px !important;
+        right: 10px !important;
+        width: auto !important;
+        max-width: calc(100vw - 20px);
+    }
+    
+    /* Swipe gestures hint */
+    .swipe-hint {
+        display: block;
+        text-align: center;
+        font-size: 12px;
+        color: var(--secondary);
+        margin-top: 8px;
+    }
+}
+
+/* Tablet optimizations */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .metric-grid, .stats-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+    
+    .kpi-hero-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    /* Larger hit areas */
+    a, button, .clickable {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    /* Remove hover effects on touch devices */
+    .btn:hover, button:hover {
+        transform: none;
+    }
+    
+    /* Better focus states */
+    input:focus, select:focus, textarea:focus, button:focus {
+        outline: 3px solid var(--primary);
+        outline-offset: 2px;
+    }
+}
+
+/* Landscape mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    .modal-content {
+        max-height: 85vh;
+    }
+    
+    .chart-container {
+        min-height: 250px;
+    }
+}
+

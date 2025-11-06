@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ABBIS Offline Field Report</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="assets/css/styles.css">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(()=>{});
+    }
+  </script>
+</head>
+<body class="theme-light" style="padding: 16px;">
+  <h1>📝 Offline Field Report</h1>
+  <p>You can capture a basic report offline. It will sync when you reconnect.</p>
+  <form id="offlineForm" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+    <div><label>Date</label><input type="date" name="report_date"></div>
+    <div><label>Rig</label><input type="text" name="rig"></div>
+    <div style="grid-column:1/-1"><label>Client</label><input type="text" name="client"></div>
+    <div><label>Latitude</label><input type="number" step="0.000001" name="latitude" id="latitude"></div>
+    <div><label>Longitude</label><input type="number" step="0.000001" name="longitude" id="longitude"></div>
+    <div style="grid-column:1/-1"><label>Plus Code</label><input type="text" name="plus_code" id="plus_code"></div>
+    <div style="grid-column:1/-1"><label>Notes</label><textarea name="notes" rows="3"></textarea></div>
+    <div style="grid-column:1/-1"><button type="button" id="saveBtn" class="btn btn-primary">Save Offline</button></div>
+  </form>
+  <script>
+    const KEY='abbis_offline_reports';
+    document.getElementById('saveBtn').onclick=function(){
+      const data = Object.fromEntries(new FormData(document.getElementById('offlineForm')).entries());
+      const list = JSON.parse(localStorage.getItem(KEY) || '[]');
+      list.push({...data, saved_at: new Date().toISOString()});
+      localStorage.setItem(KEY, JSON.stringify(list));
+      alert('Saved offline');
+    };
+  </script>
+</body>
+</html>
+
+

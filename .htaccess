@@ -1,0 +1,100 @@
+# ABBIS v3.2 - Apache Configuration
+# Security-Enhanced but Backward Compatible
+
+# Prevent directory listing
+Options -Indexes
+
+# Allow all PHP files to be accessed directly (backward compatibility)
+# This ensures your system works normally while keeping security improvements
+
+# Protect sensitive files (read-only files like documentation)
+<FilesMatch "\.(sql|md|log|txt|bak|backup|old)$">
+    <IfModule mod_authz_host.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_host.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block access to hidden files and directories
+<FilesMatch "^\.">
+    <IfModule mod_authz_host.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_host.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Security Headers (if mod_headers is available)
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header set X-Frame-Options "SAMEORIGIN"
+    
+    # Prevent MIME type sniffing
+    Header set X-Content-Type-Options "nosniff"
+    
+    # Enable XSS protection
+    Header set X-XSS-Protection "1; mode=block"
+    
+    # Referrer policy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Enable compression for better performance
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Set default charset
+AddDefaultCharset UTF-8
+
+# CMS URL Routing
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /abbis3.2/
+    
+           # Route CMS homepage
+           RewriteCond %{REQUEST_FILENAME} !-f
+           RewriteCond %{REQUEST_FILENAME} !-d
+           RewriteRule ^cms/?$ cms/public/index.php [L,QSA]
+           
+           # Route CMS URLs to public PHP files (only if file doesn't exist)
+           RewriteCond %{REQUEST_FILENAME} !-f
+           RewriteCond %{REQUEST_FILENAME} !-d
+           RewriteRule ^cms/shop/?$ cms/public/shop.php [L,QSA]
+           RewriteRule ^cms/product/([0-9]+)/?$ cms/public/product.php?id=$1 [L,QSA]
+           RewriteRule ^cms/quote/?$ cms/public/quote.php [L,QSA]
+           RewriteRule ^cms/cart/?$ cms/public/cart.php [L,QSA]
+           RewriteRule ^cms/checkout/?$ cms/public/checkout.php [L,QSA]
+           RewriteRule ^cms/blog/?$ cms/public/blog.php [L,QSA]
+           RewriteRule ^cms/post/([^/]+)/?$ cms/public/post.php?slug=$1 [L,QSA]
+           RewriteRule ^cms/admin/?$ cms/admin/index.php [L]
+           RewriteRule ^cms/admin/(.*)$ cms/admin/$1 [L]
+    # Route CMS pages - WordPress-like clean URLs
+    # Payment routes
+    RewriteRule ^cms/payment/callback/?$ cms/public/payment/callback.php [L,QSA]
+    RewriteRule ^cms/payment/gateway/?$ cms/public/payment/gateway.php [L,QSA]
+    RewriteRule ^cms/payment/?$ cms/public/payment.php [L,QSA]
+    # Order confirmation route
+    RewriteRule ^cms/order-confirmation/?$ cms/public/order-confirmation.php [L,QSA]
+    # Legal documents routes
+    RewriteRule ^cms/legal/([^/]+)/print/?$ cms/public/legal-print.php?slug=$1 [L,QSA]
+    RewriteRule ^cms/legal/([^/]+)/?$ cms/public/legal-view.php?slug=$1 [L,QSA]
+    # Profile route
+    RewriteRule ^cms/profile/?$ cms/public/profile.php [L,QSA]
+    
+    # Route CMS pages - must be last to catch all cms/* URLs
+           # Exclude known routes first (including index.php)
+           RewriteCond %{REQUEST_URI} !^/abbis3.2/cms/(shop|product|quote|cart|checkout|blog|post|admin|payment|legal|order-confirmation|profile) [NC]
+           RewriteCond %{REQUEST_FILENAME} !-f
+           RewriteCond %{REQUEST_FILENAME} !-d
+           RewriteRule ^cms/([^/]+)/?$ cms/public/page.php?slug=$1 [L,QSA]
+</IfModule>
+
+# NOTE: URL routing and obfuscation are available but disabled by default
+# To enable URL routing, uncomment the lines below and configure router.php
+# For now, all PHP files are accessible directly to maintain backward compatibility

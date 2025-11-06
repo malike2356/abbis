@@ -1,0 +1,41 @@
+-- AI/ML Supporting Tables (lightweight)
+
+CREATE TABLE IF NOT EXISTS ai_insights (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  area VARCHAR(50) NOT NULL, -- dashboard, finance, resources, crm
+  title VARCHAR(150) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  confidence DECIMAL(5,2) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS forecasts_cashflow (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  forecast_date DATE NOT NULL,
+  inflow DECIMAL(18,2) DEFAULT 0,
+  outflow DECIMAL(18,2) DEFAULT 0,
+  net DECIMAL(18,2) DEFAULT 0,
+  horizon VARCHAR(10) NOT NULL, -- 30d, 60d, 90d
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY u1 (forecast_date, horizon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS forecasts_materials (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  material_key VARCHAR(100) NOT NULL,
+  forecast_date DATE NOT NULL,
+  demand_qty DECIMAL(18,2) DEFAULT 0,
+  horizon VARCHAR(10) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (material_key, forecast_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  endpoint VARCHAR(100) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  meta JSON NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+

@@ -1,0 +1,36 @@
+ABBIS Update Package
+====================
+
+Package Name: abbis-update-2025-11-14-165044
+Created: " . date('Y-m-d H:i:s') . "
+Size: 2.38 MB
+
+UPDATE INSTRUCTIONS:
+====================
+
+1. Upload this ZIP file to your server (via cPanel File Manager or FTP)
+   Location: /public_html/abbis3.2/ (or your ABBIS directory)
+
+2. Extract the ZIP file on the server
+
+3. Run the update script:
+   php scripts/deploy/update-server.php
+
+   OR via cPanel Terminal:
+   cd /path/to/abbis3.2
+   php scripts/deploy/update-server.php
+
+4. The script will:
+   - Backup current files
+   - Extract new files
+   - Set proper permissions
+   - Verify installation
+
+5. Clear browser cache and test your site
+
+IMPORTANT:
+- Keep your config/deployment.php file (it won't be overwritten)
+- Keep your uploads/ directory (it won't be overwritten)
+- Database changes (if any) need to be applied separately
+
+For detailed instructions, see: docs/DEPLOYMENT_UPDATE_GUIDE.md

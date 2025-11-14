@@ -150,7 +150,16 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
         mkdir($targetDir, 0755, true);
     }
     
-    copy($zip->getStream($filename), fopen($targetPath, 'w'));
+    // Extract file from ZIP using stream_copy_to_stream (copy() doesn't work with streams)
+    $stream = $zip->getStream($filename);
+    if ($stream) {
+        $targetFile = fopen($targetPath, 'w');
+        if ($targetFile) {
+            stream_copy_to_stream($stream, $targetFile);
+            fclose($targetFile);
+        }
+        fclose($stream);
+    }
     $extractedCount++;
     
     if ($extractedCount % 50 == 0) {

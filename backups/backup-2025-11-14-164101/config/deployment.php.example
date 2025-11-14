@@ -1,0 +1,30 @@
+<?php
+/**
+ * Deployment Configuration
+ * 
+ * Copy this file to deployment.php and update with your production settings
+ * This is the SINGLE SOURCE OF TRUTH for all URLs after deployment
+ * 
+ * Usage:
+ * 1. Copy this file: cp config/deployment.php.example config/deployment.php
+ * 2. Update APP_URL with your production domain
+ * 3. All URLs throughout the system will automatically use this value
+ */
+
+// Production URL - CHANGE THIS FOR DEPLOYMENT
+// Examples:
+// - cPanel: 'https://yourdomain.com'
+// - Hostinger: 'https://yourdomain.com'
+// - Subdomain: 'https://abbis.yourdomain.com'
+// - With subdirectory: 'https://yourdomain.com/abbis3.2'
+define('APP_URL', 'https://yourdomain.com');
+
+// Environment (development, staging, production)
+define('APP_ENV', 'production');
+
+// Debug mode (should be false in production)
+define('DEBUG', false);
+
+// Database settings (if different from environment.php)
+// These are usually set in environment.php, but you can override here if needed
+

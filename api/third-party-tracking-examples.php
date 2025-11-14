@@ -225,7 +225,7 @@ function fetchFromCustomAPI($config) {
         'longitude' => floatval($data['lng'] ?? $data['longitude'] ?? 0),
         'accuracy' => isset($data['accuracy']) ? floatval($data['accuracy']) : null,
         'speed' => isset($data['speed']) ? floatval($data['speed']) : null,
-        'heading' => isset($data['heading'] ?? $data['bearing']) ? floatval($data['heading'] ?? $data['bearing']) : null,
+        'heading' => isset($data['heading']) ? floatval($data['heading']) : (isset($data['bearing']) ? floatval($data['bearing']) : null),
         'altitude' => isset($data['altitude']) ? floatval($data['altitude']) : null
     ];
 }
@@ -310,6 +310,6 @@ function fetchFromCustomAPI($config) {
  * }
  * 
  * Add to crontab (every 5 minutes):
- * */5 * * * * php /path/to/abbis3.2/api/sync-rig-locations.php
+ * *\/5 * * * * php /path/to/abbis3.2/api/sync-rig-locations.php
  */
 

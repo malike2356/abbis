@@ -195,15 +195,5 @@ function calculateNextSendTime($frequency) {
         default:
             return date('Y-m-d H:i:s', strtotime('+1 day'));
     }
-} catch (Exception $e) {
-    if (php_sapi_name() === 'cli') {
-        echo "Error: " . $e->getMessage() . "\n";
-    } else {
-        header('Content-Type: application/json');
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-    }
-    error_log("scheduled-reports.php error: " . $e->getMessage());
-    exit(1);
 }
 

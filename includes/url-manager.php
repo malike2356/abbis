@@ -166,7 +166,11 @@ if (!function_exists('redirect_url')) {
      * @return string Full redirect URL
      */
     function redirect_url(string $path, array $params = []): string {
-        return site_url($path, $params);
+        $url = site_url($path);
+        if (!empty($params)) {
+            $url .= '?' . http_build_query($params);
+        }
+        return $url;
     }
 }
 

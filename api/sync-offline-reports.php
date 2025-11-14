@@ -113,6 +113,8 @@ try {
  * Sync offline report to database
  */
 function syncOfflineReport($pdo, $report) {
+    global $abbis;
+    
     try {
         $pdo->beginTransaction();
         
@@ -133,7 +135,7 @@ function syncOfflineReport($pdo, $report) {
         }
         
         // Check for conflicts (duplicate reports) - only for new reports
-        $conflict = checkConflict($pdo, $report, $rigId ?? null, $clientId ?? null);
+        $conflict = checkConflict($pdo, $report);
         if ($conflict['has_conflict'] && !($report['force_sync'] ?? false)) {
             $pdo->rollBack();
             return [
@@ -380,9 +382,14 @@ function syncOfflineReport($pdo, $report) {
         if (($report['job_type'] ?? '') === 'maintenance' || ($report['is_maintenance_work'] ?? false)) {
             try {
                 $extractor = new MaintenanceExtractor($pdo);
-                $maintenanceData = $extractor->extractFromReport($reportData);
+                $maintenanceData = $extractor->extractFromFieldReport($report);
                 if ($maintenanceData) {
-                    $extractor->createMaintenanceRecord($maintenanceData, $reportDbId);
+                    $userId = $_SESSION['user_id'] ?? null;
+                    if (!$userId) {
+                        // Try to get user from report or use system user
+                        $userId = $report['user_id'] ?? 1; // Default to admin/system user
+                    }
+                    $extractor->createMaintenanceRecord($maintenanceData, $reportDbId, $userId);
                 }
             } catch (Exception $e) {
                 error_log('Maintenance extraction error: ' . $e->getMessage());

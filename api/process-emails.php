@@ -1,7 +1,7 @@
 <?php
 /**
  * Process Email Queue
- * Run this via cron: */5 * * * * php /path/to/api/process-emails.php
+ * Run this via cron: *\/5 * * * * php /path/to/api/process-emails.php
  */
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../includes/EmailNotification.php';

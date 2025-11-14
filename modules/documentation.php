@@ -97,7 +97,7 @@ function determineCategory($path) {
         return 'AI & Automation';
     } elseif (strpos($pathLower, 'accounting') !== false || strpos($pathLower, 'financial') !== false) {
         return 'Accounting & Finance';
-    } elseif (strpos($pathLower, 'integration') !== false) {
+    } elseif (strpos($pathLower, 'integration') !== false || strpos($pathLower, 'client_portal') !== false) {
         return 'Integrations';
     } elseif (strpos($pathLower, 'security') !== false || strpos($pathLower, 'iam') !== false || strpos($pathLower, 'admin') !== false) {
         return 'Security & Admin';

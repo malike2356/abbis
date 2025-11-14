@@ -1314,6 +1314,27 @@ require_once '../includes/header.php';
             <div class="help-item">
                 <h3>Client Portal &amp; Online Payments</h3>
                 <p>The Client Portal allows customers to review quotes, invoices, projects, and make secure online payments.</p>
+                <h4>Full System Integration</h4>
+                <ul>
+                    <li><strong>ABBIS Clients:</strong> Fully integrated - uses same database table, direct user-client linking, full SSO support</li>
+                    <li><strong>POS Customers:</strong> Fully integrated - POS sales linked to ABBIS clients, unified customer data</li>
+                    <li><strong>CMS Customers:</strong> Fully integrated - automatic client creation from CMS orders and quote requests, portal access enabled automatically</li>
+                </ul>
+                <h4>Automatic Account Creation</h4>
+                <ul>
+                    <li>When a customer places an order on the CMS website, an ABBIS client account is automatically created</li>
+                    <li>When a customer submits a quote request, an ABBIS client account is automatically created</li>
+                    <li>A user account with ROLE_CLIENT is automatically created and linked to the client</li>
+                    <li>Welcome email sent with portal access credentials (username and temporary password)</li>
+                    <li>Clients can immediately access the portal to view quotes, invoices, payments, and order history</li>
+                </ul>
+                <h4>Unified Dashboard</h4>
+                <ul>
+                    <li>View ABBIS quotes, invoices, and payments</li>
+                    <li>View CMS order history and status</li>
+                    <li>View POS purchase history</li>
+                    <li>All customer data in one unified view</li>
+                </ul>
                 <ul>
                     <li><strong>Access:</strong> Clients sign in at <code>/client-portal/login.php</code> using accounts with role <code>client</code>.</li>
                     <li><strong>Dashboard:</strong> Shows quote counts, outstanding balances, project summaries, and quick links.</li>

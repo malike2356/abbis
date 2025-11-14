@@ -69,27 +69,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pumpPreferencesJson, $latitude, $longitude, $address, $estimatedBudget
             ]);
             
-            // Try to create/update in CRM clients table
+            // Sync to ABBIS client and create portal access
             try {
-                $clientStmt = $pdo->prepare("
-                    INSERT INTO clients (client_name, email, contact_number, address, source, status)
-                    VALUES (?,?,?,?,'website','lead')
-                    ON DUPLICATE KEY UPDATE contact_number=?, address=?
-                ");
-                $clientStmt->execute([$name, $email, $phone, $address ?: $location, $phone, $address ?: $location]);
+                require_once $rootPath . '/includes/ClientPortal/CmsClientSync.php';
+                $cmsSync = new CmsClientSync();
+                $syncResult = $cmsSync->syncFromQuoteRequest([
+                    'name' => $name,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'address' => $address,
+                    'location' => $location
+                ]);
                 
-                $clientId = $pdo->lastInsertId();
-                if (!$clientId) {
-                    $checkStmt = $pdo->prepare("SELECT id FROM clients WHERE email=?");
-                    $checkStmt->execute([$email]);
-                    $clientId = $checkStmt->fetchColumn();
-                }
-                
-                if ($clientId) {
-                    $pdo->prepare("UPDATE cms_quote_requests SET converted_to_client_id=? WHERE email=? AND converted_to_client_id IS NULL")
-                        ->execute([$clientId, $email]);
-                }
-            } catch (Throwable $ignored) {}
+                // Client and user account created/updated automatically
+                // Welcome email sent if new user
+            } catch (Exception $e) {
+                // Fallback: Try to create/update in CRM clients table
+                error_log('CMS Quote Sync Error: ' . $e->getMessage());
+                try {
+                    $clientStmt = $pdo->prepare("
+                        INSERT INTO clients (client_name, email, contact_number, address, source, status)
+                        VALUES (?,?,?,?,'website','lead')
+                        ON DUPLICATE KEY UPDATE contact_number=?, address=?
+                    ");
+                    $clientStmt->execute([$name, $email, $phone, $address ?: $location, $phone, $address ?: $location]);
+                    
+                    $clientId = $pdo->lastInsertId();
+                    if (!$clientId) {
+                        $checkStmt = $pdo->prepare("SELECT id FROM clients WHERE email=?");
+                        $checkStmt->execute([$email]);
+                        $clientId = $checkStmt->fetchColumn();
+                    }
+                    
+                    if ($clientId) {
+                        $pdo->prepare("UPDATE cms_quote_requests SET converted_to_client_id=? WHERE email=? AND converted_to_client_id IS NULL")
+                            ->execute([$clientId, $email]);
+                    }
+                } catch (Throwable $ignored) {}
+            }
             
             // Try to create CRM follow-up
             try {

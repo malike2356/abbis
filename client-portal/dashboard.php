@@ -256,6 +256,50 @@ try {
             ];
         }
         
+        // CMS Orders stats (if client has orders)
+        try {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    COALESCE(COUNT(*), 0) as total,
+                    COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
+                    COALESCE(SUM(total_amount), 0) as total_spent
+                FROM cms_orders 
+                WHERE client_id = ?
+            ");
+            $stmt->execute([$clientId]);
+            $orderStats = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($orderStats && $orderStats['total'] > 0) {
+                $stats['cms_orders'] = [
+                    'total' => (int)($orderStats['total'] ?? 0),
+                    'completed' => (int)($orderStats['completed'] ?? 0),
+                    'total_spent' => (float)($orderStats['total_spent'] ?? 0.0)
+                ];
+            }
+        } catch (PDOException $e) {
+            // CMS orders table might not exist
+        }
+        
+        // POS Purchases stats (if client has POS sales)
+        try {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    COALESCE(COUNT(*), 0) as total,
+                    COALESCE(SUM(total_amount), 0) as total_spent
+                FROM pos_sales 
+                WHERE customer_id = ? AND status = 'completed'
+            ");
+            $stmt->execute([$clientId]);
+            $posStats = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($posStats && $posStats['total'] > 0) {
+                $stats['pos_purchases'] = [
+                    'total' => (int)($posStats['total'] ?? 0),
+                    'total_spent' => (float)($posStats['total_spent'] ?? 0.0)
+                ];
+            }
+        } catch (PDOException $e) {
+            // POS sales table might not exist
+        }
+        
         // Projects stats (field reports)
         $stmt = $pdo->prepare("
             SELECT COALESCE(COUNT(*), 0) as total

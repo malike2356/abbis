@@ -177,22 +177,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
         try {
             $pdo->beginTransaction();
             
-            // Create order
-            // Check if customer is an existing ABBIS client
+            // Create order and sync to ABBIS client with portal access
             $clientId = null;
             try {
-                $clientCheck = $pdo->prepare("SELECT id FROM clients WHERE email=? OR client_name=? LIMIT 1");
-                $clientCheck->execute([$customerEmail, $customerName]);
-                $clientId = $clientCheck->fetchColumn();
+                require_once $rootPath . '/includes/ClientPortal/CmsClientSync.php';
+                $cmsSync = new CmsClientSync();
+                $syncResult = $cmsSync->syncFromOrder([
+                    'customer_name' => $customerName,
+                    'customer_email' => $customerEmail,
+                    'customer_phone' => $customerPhone,
+                    'customer_address' => $customerAddress
+                ]);
                 
-                // If not found, create new client
-                if (!$clientId) {
-                    $newClientStmt = $pdo->prepare("INSERT INTO clients (client_name, email, contact_number, address, source, status, created_at) VALUES (?,?,?,?,'CMS Order','lead',NOW())");
-                    $newClientStmt->execute([$customerName, $customerEmail, $customerPhone, $customerAddress]);
-                    $clientId = $pdo->lastInsertId();
+                if ($syncResult['success']) {
+                    $clientId = $syncResult['client_id'];
+                    // Client and user account created/updated automatically
                 }
             } catch (Exception $e) {
-                // Clients table might not exist or other error - continue without linking
+                // Fallback to basic client creation if sync fails
+                error_log('CMS Client Sync Error: ' . $e->getMessage());
+                try {
+                    $clientCheck = $pdo->prepare("SELECT id FROM clients WHERE email=? OR client_name=? LIMIT 1");
+                    $clientCheck->execute([$customerEmail, $customerName]);
+                    $clientId = $clientCheck->fetchColumn();
+                    
+                    if (!$clientId) {
+                        $newClientStmt = $pdo->prepare("INSERT INTO clients (client_name, email, contact_number, address, source, status, created_at) VALUES (?,?,?,?,'CMS Order','customer',NOW())");
+                        $newClientStmt->execute([$customerName, $customerEmail, $customerPhone, $customerAddress]);
+                        $clientId = $pdo->lastInsertId();
+                    }
+                } catch (Exception $e2) {
+                    // Continue without client linking
+                }
             }
             
             $orderStmt = $pdo->prepare("

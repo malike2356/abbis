@@ -133,13 +133,19 @@ $zip->close();
 
 // Get package size
 $packageSize = filesize($packagePath);
-$packageSizeMB = round($packageSize / 1024 / 1024, 2);
+if ($packageSize < 1024) {
+    $packageSizeFormatted = $packageSize . ' bytes';
+} elseif ($packageSize < 1024 * 1024) {
+    $packageSizeFormatted = round($packageSize / 1024, 2) . ' KB';
+} else {
+    $packageSizeFormatted = round($packageSize / 1024 / 1024, 2) . ' MB';
+}
 
 echo "\n✅ Package created successfully!\n\n";
 echo "📊 Package Details:\n";
 echo "   File: {$packageName}.zip\n";
 echo "   Location: {$packagePath}\n";
-echo "   Size: {$packageSizeMB} MB\n";
+echo "   Size: {$packageSizeFormatted}\n";
 echo "   Files: {$fileCount}\n";
 echo "   Directories: {$dirCount}\n\n";
 
@@ -150,7 +156,7 @@ ABBIS Update Package
 
 Package Name: {$packageName}
 Created: " . date('Y-m-d H:i:s') . "
-Size: {$packageSizeMB} MB
+Size: {$packageSizeFormatted}
 
 UPDATE INSTRUCTIONS:
 ====================

@@ -10,10 +10,11 @@ require_once $rootPath . '/includes/functions.php';
 require_once __DIR__ . '/admin/auth.php';
 
 $cmsAuth = new CMSAuth();
+$baseUrl = app_base_path();
 
 // Redirect if not logged in
 if (!$cmsAuth->isLoggedIn()) {
-    header('Location: ' . ($baseUrl ?? '/abbis3.2') . '/cms/admin/login.php');
+    header('Location: ' . app_url('cms/admin/login.php'));
     exit;
 }
 
@@ -21,13 +22,6 @@ $pdo = getDBConnection();
 $currentUser = $cmsAuth->getCurrentUser();
 $message = null;
 $error = null;
-
-// Get base URL
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
 
 // Handle profile update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {

@@ -216,10 +216,13 @@ $primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Profile - <?php echo htmlspecialchars($companyName); ?></title>
-    <?php include __DIR__ . '/header.php'; ?>
     <style>
         * {
             box-sizing: border-box;
+        }
+        
+        body {
+            background: #f5f5f5;
         }
         
         .profile-wrapper {
@@ -731,238 +734,243 @@ $primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
     </style>
 </head>
 <body>
-    <main class="cms-content">
-        <div class="profile-wrapper">
-            <div class="profile-container">
-                <?php if ($message): ?>
-                    <div class="alert alert-<?php echo $messageType; ?>">
-                        <i class="fas fa-<?php echo $messageType === 'success' ? 'check-circle' : 'exclamation-circle'; ?>"></i>
-                        <span><?php echo htmlspecialchars($message); ?></span>
+    <?php 
+    $headerPath = __DIR__ . '/header.php';
+    if (file_exists($headerPath)) {
+        include $headerPath;
+    }
+    ?>
+    
+    <main class="cms-site-main profile-wrapper">
+        <div class="profile-container">
+            <?php if ($message): ?>
+                <div class="alert alert-<?php echo $messageType; ?>">
+                    <i class="fas fa-<?php echo $messageType === 'success' ? 'check-circle' : 'exclamation-circle'; ?>"></i>
+                    <span><?php echo htmlspecialchars($message); ?></span>
+                </div>
+            <?php endif; ?>
+            
+            <!-- Hero Banner -->
+            <div class="profile-hero">
+                <div class="hero-content">
+                    <div class="hero-avatar">
+                        <?php
+                        $avatar = $currentUser['avatar'] ?? '';
+                        $displayName = $currentUser['display_name'] ?? $currentUser['first_name'] ?? $currentUser['username'] ?? 'User';
+                        $initials = strtoupper(substr($displayName, 0, 1));
+                        $avatarPath = $avatar ? $baseUrl . '/' . ltrim($avatar, '/') : '';
+                        ?>
+                        <?php if ($avatar && file_exists($rootPath . '/' . ltrim($avatar, '/'))): ?>
+                            <img src="<?php echo htmlspecialchars($avatarPath); ?>" alt="Profile" class="profile-avatar-large">
+                        <?php else: ?>
+                            <div class="profile-avatar-placeholder"><?php echo htmlspecialchars($initials); ?></div>
+                        <?php endif; ?>
                     </div>
-                <?php endif; ?>
-                
-                <!-- Hero Banner -->
-                <div class="profile-hero">
-                    <div class="hero-content">
-                        <div class="hero-avatar">
-                            <?php
-                            $avatar = $currentUser['avatar'] ?? '';
-                            $displayName = $currentUser['display_name'] ?? $currentUser['first_name'] ?? $currentUser['username'] ?? 'User';
-                            $initials = strtoupper(substr($displayName, 0, 1));
-                            $avatarPath = $avatar ? $baseUrl . '/' . ltrim($avatar, '/') : '';
-                            ?>
-                            <?php if ($avatar && file_exists($rootPath . '/' . ltrim($avatar, '/'))): ?>
-                                <img src="<?php echo htmlspecialchars($avatarPath); ?>" alt="Profile" class="profile-avatar-large">
-                            <?php else: ?>
-                                <div class="profile-avatar-placeholder"><?php echo htmlspecialchars($initials); ?></div>
-                            <?php endif; ?>
-                        </div>
-                        <div class="hero-info">
-                            <h1><?php echo htmlspecialchars($displayName); ?></h1>
-                            <?php if (!empty($currentUser['bio'])): ?>
-                                <p><?php echo htmlspecialchars(substr($currentUser['bio'], 0, 150)) . (strlen($currentUser['bio']) > 150 ? '...' : ''); ?></p>
-                            <?php else: ?>
-                                <p>Welcome to your profile! Complete your information to get started.</p>
-                            <?php endif; ?>
-                            <div class="hero-meta">
-                                <div class="hero-meta-item">
-                                    <i class="fas fa-user"></i>
-                                    <span><?php echo htmlspecialchars($currentUser['username'] ?? ''); ?></span>
-                                </div>
-                                <div class="hero-meta-item">
-                                    <i class="fas fa-envelope"></i>
-                                    <span><?php echo htmlspecialchars($currentUser['email'] ?? ''); ?></span>
-                                </div>
-                                <div class="hero-meta-item">
-                                    <i class="fas fa-shield-alt"></i>
-                                    <span><?php echo htmlspecialchars(ucfirst($currentUser['role'] ?? 'user')); ?></span>
-                                </div>
-                                <?php if (!empty($currentUser['location'])): ?>
-                                <div class="hero-meta-item">
-                                    <i class="fas fa-map-marker-alt"></i>
-                                    <span><?php echo htmlspecialchars($currentUser['location']); ?></span>
-                                </div>
-                                <?php endif; ?>
+                    <div class="hero-info">
+                        <h1><?php echo htmlspecialchars($displayName); ?></h1>
+                        <?php if (!empty($currentUser['bio'])): ?>
+                            <p><?php echo htmlspecialchars(substr($currentUser['bio'], 0, 150)) . (strlen($currentUser['bio']) > 150 ? '...' : ''); ?></p>
+                        <?php else: ?>
+                            <p>Welcome to your profile! Complete your information to get started.</p>
+                        <?php endif; ?>
+                        <div class="hero-meta">
+                            <div class="hero-meta-item">
+                                <i class="fas fa-user"></i>
+                                <span><?php echo htmlspecialchars($currentUser['username'] ?? ''); ?></span>
                             </div>
+                            <div class="hero-meta-item">
+                                <i class="fas fa-envelope"></i>
+                                <span><?php echo htmlspecialchars($currentUser['email'] ?? ''); ?></span>
+                            </div>
+                            <div class="hero-meta-item">
+                                <i class="fas fa-shield-alt"></i>
+                                <span><?php echo htmlspecialchars(ucfirst($currentUser['role'] ?? 'user')); ?></span>
+                            </div>
+                            <?php if (!empty($currentUser['location'])): ?>
+                            <div class="hero-meta-item">
+                                <i class="fas fa-map-marker-alt"></i>
+                                <span><?php echo htmlspecialchars($currentUser['location']); ?></span>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
-                
-                <!-- Main Layout -->
-                <div class="profile-layout">
-                    <!-- Sidebar -->
-                    <div class="profile-sidebar">
-                        <div class="sidebar-card">
-                            <h3><i class="fas fa-chart-line"></i> Account Statistics</h3>
-                            <div class="stat-item">
-                                <span class="stat-label">Member Since</span>
-                                <span class="stat-value"><?php echo date('M Y', strtotime($currentUser['created_at'] ?? 'now')); ?></span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Last Updated</span>
-                                <span class="stat-value"><?php echo !empty($currentUser['updated_at']) ? date('M d, Y', strtotime($currentUser['updated_at'])) : 'Never'; ?></span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Profile Completion</span>
-                                <span class="stat-value"><?php
-                                    $fields = ['first_name', 'last_name', 'display_name', 'bio', 'phone', 'location', 'website', 'avatar'];
-                                    $completed = 0;
-                                    foreach ($fields as $field) {
-                                        if (!empty($currentUser[$field])) $completed++;
-                                    }
-                                    echo round(($completed / count($fields)) * 100);
-                                ?>%</span>
-                            </div>
+            </div>
+            
+            <!-- Main Layout -->
+            <div class="profile-layout">
+                <!-- Sidebar -->
+                <div class="profile-sidebar">
+                    <div class="sidebar-card">
+                        <h3><i class="fas fa-chart-line"></i> Account Statistics</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">Member Since</span>
+                            <span class="stat-value"><?php echo date('M Y', strtotime($currentUser['created_at'] ?? 'now')); ?></span>
                         </div>
-                        
-                        <div class="sidebar-card">
-                            <h3><i class="fas fa-info-circle"></i> Quick Info</h3>
-                            <ul class="quick-info">
-                                <li>
-                                    <i class="fas fa-user-tag"></i>
-                                    <span><strong>Username:</strong> <?php echo htmlspecialchars($currentUser['username'] ?? 'N/A'); ?></span>
-                                </li>
-                                <li>
-                                    <i class="fas fa-envelope"></i>
-                                    <span><strong>Email:</strong> <?php echo htmlspecialchars($currentUser['email'] ?? 'N/A'); ?></span>
-                                </li>
-                                <?php if (!empty($currentUser['phone'])): ?>
-                                <li>
-                                    <i class="fas fa-phone"></i>
-                                    <span><strong>Phone:</strong> <?php echo htmlspecialchars($currentUser['phone']); ?></span>
-                                </li>
-                                <?php endif; ?>
-                                <?php if (!empty($currentUser['website'])): ?>
-                                <li>
-                                    <i class="fas fa-globe"></i>
-                                    <span><strong>Website:</strong> <a href="<?php echo htmlspecialchars($currentUser['website']); ?>" target="_blank" style="color: <?php echo htmlspecialchars($primaryColor); ?>;">Visit</a></span>
-                                </li>
-                                <?php endif; ?>
-                            </ul>
+                        <div class="stat-item">
+                            <span class="stat-label">Last Updated</span>
+                            <span class="stat-value"><?php echo !empty($currentUser['updated_at']) ? date('M d, Y', strtotime($currentUser['updated_at'])) : 'Never'; ?></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Profile Completion</span>
+                            <span class="stat-value"><?php
+                                $fields = ['first_name', 'last_name', 'display_name', 'bio', 'phone', 'location', 'website', 'avatar'];
+                                $completed = 0;
+                                foreach ($fields as $field) {
+                                    if (!empty($currentUser[$field])) $completed++;
+                                }
+                                echo round(($completed / count($fields)) * 100);
+                            ?>%</span>
                         </div>
                     </div>
                     
-                    <!-- Main Content -->
-                    <div class="profile-main">
-                        <!-- Tabs -->
-                        <div class="profile-tabs">
-                            <button class="profile-tab active" onclick="switchTab('personal')">
-                                <i class="fas fa-user-edit"></i> Personal Info
-                            </button>
-                            <button class="profile-tab" onclick="switchTab('avatar')">
-                                <i class="fas fa-image"></i> Profile Picture
-                            </button>
-                            <button class="profile-tab" onclick="switchTab('password')">
-                                <i class="fas fa-lock"></i> Security
-                            </button>
-                        </div>
-                        
-                        <!-- Tab: Personal Information -->
-                        <div id="tab-personal" class="tab-content active">
-                            <div class="profile-section">
-                                <h2><i class="fas fa-user-edit"></i> Personal Information</h2>
-                                <form method="POST">
-                                    <input type="hidden" name="action" value="update_profile">
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="first_name">First Name</label>
-                                            <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($currentUser['first_name'] ?? ''); ?>" placeholder="Enter your first name">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="last_name">Last Name</label>
-                                            <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($currentUser['last_name'] ?? ''); ?>" placeholder="Enter your last name">
-                                        </div>
+                    <div class="sidebar-card">
+                        <h3><i class="fas fa-info-circle"></i> Quick Info</h3>
+                        <ul class="quick-info">
+                            <li>
+                                <i class="fas fa-user-tag"></i>
+                                <span><strong>Username:</strong> <?php echo htmlspecialchars($currentUser['username'] ?? 'N/A'); ?></span>
+                            </li>
+                            <li>
+                                <i class="fas fa-envelope"></i>
+                                <span><strong>Email:</strong> <?php echo htmlspecialchars($currentUser['email'] ?? 'N/A'); ?></span>
+                            </li>
+                            <?php if (!empty($currentUser['phone'])): ?>
+                            <li>
+                                <i class="fas fa-phone"></i>
+                                <span><strong>Phone:</strong> <?php echo htmlspecialchars($currentUser['phone']); ?></span>
+                            </li>
+                            <?php endif; ?>
+                            <?php if (!empty($currentUser['website'])): ?>
+                            <li>
+                                <i class="fas fa-globe"></i>
+                                <span><strong>Website:</strong> <a href="<?php echo htmlspecialchars($currentUser['website']); ?>" target="_blank" style="color: <?php echo htmlspecialchars($primaryColor); ?>;">Visit</a></span>
+                            </li>
+                            <?php endif; ?>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Main Content -->
+                <div class="profile-main">
+                    <!-- Tabs -->
+                    <div class="profile-tabs">
+                        <button class="profile-tab active" onclick="switchTab('personal')">
+                            <i class="fas fa-user-edit"></i> Personal Info
+                        </button>
+                        <button class="profile-tab" onclick="switchTab('avatar')">
+                            <i class="fas fa-image"></i> Profile Picture
+                        </button>
+                        <button class="profile-tab" onclick="switchTab('password')">
+                            <i class="fas fa-lock"></i> Security
+                        </button>
+                    </div>
+                    
+                    <!-- Tab: Personal Information -->
+                    <div id="tab-personal" class="tab-content active">
+                        <div class="profile-section">
+                            <h2><i class="fas fa-user-edit"></i> Personal Information</h2>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="update_profile">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="first_name">First Name</label>
+                                        <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($currentUser['first_name'] ?? ''); ?>" placeholder="Enter your first name">
                                     </div>
                                     <div class="form-group">
-                                        <label for="display_name">Display Name</label>
-                                        <input type="text" id="display_name" name="display_name" value="<?php echo htmlspecialchars($currentUser['display_name'] ?? ''); ?>" placeholder="How your name appears on the site">
+                                        <label for="last_name">Last Name</label>
+                                        <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($currentUser['last_name'] ?? ''); ?>" placeholder="Enter your last name">
                                     </div>
-                                    <div class="form-group">
-                                        <label for="email">Email Address</label>
-                                        <input type="email" id="email" name="email" value="<?php echo htmlspecialchars($currentUser['email'] ?? ''); ?>" required placeholder="your.email@example.com">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="bio">Biography</label>
-                                        <textarea id="bio" name="bio" placeholder="Tell us about yourself..."><?php echo htmlspecialchars($currentUser['bio'] ?? ''); ?></textarea>
-                                    </div>
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="phone">Phone Number</label>
-                                            <input type="tel" id="phone" name="phone" value="<?php echo htmlspecialchars($currentUser['phone'] ?? ''); ?>" placeholder="+1234567890">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="location">Location</label>
-                                            <input type="text" id="location" name="location" value="<?php echo htmlspecialchars($currentUser['location'] ?? ''); ?>" placeholder="City, Country">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="website">Website</label>
-                                        <input type="url" id="website" name="website" value="<?php echo htmlspecialchars($currentUser['website'] ?? ''); ?>" placeholder="https://example.com">
-                                    </div>
-                                    <button type="submit" class="btn btn-primary">
-                                        <i class="fas fa-save"></i> Save Changes
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                        
-                        <!-- Tab: Profile Picture -->
-                        <div id="tab-avatar" class="tab-content">
-                            <div class="profile-section">
-                                <h2><i class="fas fa-image"></i> Profile Picture</h2>
-                                <div class="avatar-upload-card">
-                                    <form method="POST" enctype="multipart/form-data" id="avatarForm">
-                                        <input type="hidden" name="action" value="upload_avatar">
-                                        <div class="avatar-upload-area">
-                                            <div id="avatarPreview">
-                                                <?php if ($avatar && file_exists($rootPath . '/' . ltrim($avatar, '/'))): ?>
-                                                    <img src="<?php echo htmlspecialchars($avatarPath); ?>" alt="Avatar" class="avatar-preview">
-                                                <?php else: ?>
-                                                    <div class="profile-avatar-placeholder" style="width: 120px; height: 120px; font-size: 3rem; background: <?php echo htmlspecialchars($primaryColor); ?>; border: 4px solid #e2e8f0;"><?php echo htmlspecialchars($initials); ?></div>
-                                                <?php endif; ?>
-                                            </div>
-                                            <div>
-                                                <div class="file-input-wrapper">
-                                                    <input type="file" name="avatar" id="avatarInput" accept="image/*" required>
-                                                    <label for="avatarInput" class="file-input-label">
-                                                        <i class="fas fa-cloud-upload-alt"></i> Choose File
-                                                    </label>
-                                                </div>
-                                                <p class="file-info">JPG, PNG, GIF, or WebP. Maximum file size: 5MB</p>
-                                            </div>
-                                        </div>
-                                        <button type="submit" class="btn btn-primary">
-                                            <i class="fas fa-upload"></i> Upload Picture
-                                        </button>
-                                    </form>
                                 </div>
-                            </div>
+                                <div class="form-group">
+                                    <label for="display_name">Display Name</label>
+                                    <input type="text" id="display_name" name="display_name" value="<?php echo htmlspecialchars($currentUser['display_name'] ?? ''); ?>" placeholder="How your name appears on the site">
+                                </div>
+                                <div class="form-group">
+                                    <label for="email">Email Address</label>
+                                    <input type="email" id="email" name="email" value="<?php echo htmlspecialchars($currentUser['email'] ?? ''); ?>" required placeholder="your.email@example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="bio">Biography</label>
+                                    <textarea id="bio" name="bio" placeholder="Tell us about yourself..."><?php echo htmlspecialchars($currentUser['bio'] ?? ''); ?></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="phone">Phone Number</label>
+                                        <input type="tel" id="phone" name="phone" value="<?php echo htmlspecialchars($currentUser['phone'] ?? ''); ?>" placeholder="+1234567890">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="location">Location</label>
+                                        <input type="text" id="location" name="location" value="<?php echo htmlspecialchars($currentUser['location'] ?? ''); ?>" placeholder="City, Country">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="website">Website</label>
+                                    <input type="url" id="website" name="website" value="<?php echo htmlspecialchars($currentUser['website'] ?? ''); ?>" placeholder="https://example.com">
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save"></i> Save Changes
+                                </button>
+                            </form>
                         </div>
-                        
-                        <!-- Tab: Change Password -->
-                        <div id="tab-password" class="tab-content">
-                            <div class="profile-section">
-                                <h2><i class="fas fa-lock"></i> Change Password</h2>
-                                <form method="POST">
-                                    <input type="hidden" name="action" value="change_password">
-                                    <div class="form-group">
-                                        <label for="current_password">Current Password</label>
-                                        <input type="password" id="current_password" name="current_password" required placeholder="Enter your current password">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="new_password">New Password</label>
-                                        <input type="password" id="new_password" name="new_password" required minlength="6" placeholder="Enter your new password">
-                                        <p style="margin-top: 0.5rem; color: #64748b; font-size: 0.875rem;">Must be at least 6 characters long.</p>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="confirm_password">Confirm New Password</label>
-                                        <input type="password" id="confirm_password" name="confirm_password" required minlength="6" placeholder="Confirm your new password">
+                    </div>
+                    
+                    <!-- Tab: Profile Picture -->
+                    <div id="tab-avatar" class="tab-content">
+                        <div class="profile-section">
+                            <h2><i class="fas fa-image"></i> Profile Picture</h2>
+                            <div class="avatar-upload-card">
+                                <form method="POST" enctype="multipart/form-data" id="avatarForm">
+                                    <input type="hidden" name="action" value="upload_avatar">
+                                    <div class="avatar-upload-area">
+                                        <div id="avatarPreview">
+                                            <?php if ($avatar && file_exists($rootPath . '/' . ltrim($avatar, '/'))): ?>
+                                                <img src="<?php echo htmlspecialchars($avatarPath); ?>" alt="Avatar" class="avatar-preview">
+                                            <?php else: ?>
+                                                <div class="profile-avatar-placeholder" style="width: 120px; height: 120px; font-size: 3rem; background: <?php echo htmlspecialchars($primaryColor); ?>; border: 4px solid #e2e8f0;"><?php echo htmlspecialchars($initials); ?></div>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div>
+                                            <div class="file-input-wrapper">
+                                                <input type="file" name="avatar" id="avatarInput" accept="image/*" required>
+                                                <label for="avatarInput" class="file-input-label">
+                                                    <i class="fas fa-cloud-upload-alt"></i> Choose File
+                                                </label>
+                                            </div>
+                                            <p class="file-info">JPG, PNG, GIF, or WebP. Maximum file size: 5MB</p>
+                                        </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary">
-                                        <i class="fas fa-key"></i> Change Password
+                                        <i class="fas fa-upload"></i> Upload Picture
                                     </button>
                                 </form>
                             </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Tab: Change Password -->
+                    <div id="tab-password" class="tab-content">
+                        <div class="profile-section">
+                            <h2><i class="fas fa-lock"></i> Change Password</h2>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="change_password">
+                                <div class="form-group">
+                                    <label for="current_password">Current Password</label>
+                                    <input type="password" id="current_password" name="current_password" required placeholder="Enter your current password">
+                                </div>
+                                <div class="form-group">
+                                    <label for="new_password">New Password</label>
+                                    <input type="password" id="new_password" name="new_password" required minlength="6" placeholder="Enter your new password">
+                                    <p style="margin-top: 0.5rem; color: #64748b; font-size: 0.875rem;">Must be at least 6 characters long.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirm_password">Confirm New Password</label>
+                                    <input type="password" id="confirm_password" name="confirm_password" required minlength="6" placeholder="Confirm your new password">
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-key"></i> Change Password
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -970,8 +978,14 @@ $primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
         </div>
     </main>
     
-    <?php include __DIR__ . '/footer.php'; ?>
+    <?php 
+    $footerPath = __DIR__ . '/footer.php';
+    if (file_exists($footerPath)) {
+        include $footerPath;
+    }
+    ?>
     
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Tab switching
         function switchTab(tabName) {

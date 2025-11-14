@@ -1,7 +1,7 @@
 {
   "name": "ABBIS Field Offline",
   "short_name": "ABBIS Field",
-  "start_url": "/abbis3.2/offline-field-report.html",
+  "start_url": "/abbis3.2/offline/",
   "display": "standalone",
   "background_color": "#0ea5e9",
   "theme_color": "#0ea5e9",

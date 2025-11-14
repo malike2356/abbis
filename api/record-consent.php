@@ -11,9 +11,10 @@ require_once '../includes/consent-manager.php';
 
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
-}
+try {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
+    }
 
 $userId = $_SESSION['user_id'] ?? null;
 $userEmail = $_SESSION['email'] ?? null;
@@ -36,7 +37,12 @@ $result = $consentManager->recordConsent($userId, $userEmail, $consentType, $ver
 
 if ($result) {
     jsonResponse(['success' => true, 'message' => 'Consent recorded']);
-} else {
-    jsonResponse(['success' => false, 'message' => 'Failed to record consent'], 500);
+    } else {
+        jsonResponse(['success' => false, 'message' => 'Failed to record consent'], 500);
+    }
+} catch (Exception $e) {
+    http_response_code(500);
+    jsonResponse(['success' => false, 'message' => $e->getMessage()], 500);
+    error_log("record-consent.php error: " . $e->getMessage());
 }
 

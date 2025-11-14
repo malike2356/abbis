@@ -11,6 +11,7 @@ require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('finance.access');
 
 $pdo = getDBConnection();
 
@@ -62,7 +63,80 @@ require_once '../includes/header.php';
                     <h1>Financial Reports</h1>
                     <p>Track income, expenses, and profitability</p>
                 </div>
+                <div>
+                    <a href="accounting.php" class="btn btn-outline" style="margin-right: 8px;">📘 View Accounting</a>
+                    <button onclick="importToAccounting()" class="btn btn-primary" id="importBtn">
+                        📥 Import to Accounting
+                    </button>
+                </div>
             </div>
+            
+            <?php
+            // Check if accounting system is available and if there are unimported reports
+            $hasAccounting = false;
+            $unimportedCount = 0;
+            try {
+                $pdo->query("SELECT 1 FROM journal_entries LIMIT 1");
+                $hasAccounting = true;
+                
+                // Count field reports that haven't been imported
+                // Journal entries use report_id as the reference field
+                $totalReports = (int)$pdo->query("SELECT COUNT(*) FROM field_reports")->fetchColumn();
+                $importedRefs = $pdo->query("SELECT DISTINCT reference FROM journal_entries WHERE reference IS NOT NULL AND reference != ''")->fetchAll(PDO::FETCH_COLUMN);
+                
+                if (!empty($importedRefs) && $totalReports > 0) {
+                    // Check how many report_ids from field_reports exist in journal_entries references
+                    // Filter out non-report_id references (like LOAN-, MATERIAL-, etc.)
+                    $reportRefs = array_filter($importedRefs, function($ref) {
+                        // Report IDs typically match field_reports.report_id format (e.g., RIG-2024-001)
+                        // Exclude known prefixes for other transaction types
+                        return !preg_match('/^(LOAN-|MATERIAL-|REPAY-|PAYROLL-)/', $ref);
+                    });
+                    
+                    if (!empty($reportRefs)) {
+                        $placeholders = str_repeat('?,', count($reportRefs) - 1) . '?';
+                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM field_reports WHERE report_id NOT IN ($placeholders)");
+                        $stmt->execute(array_values($reportRefs));
+                        $unimportedCount = (int)$stmt->fetchColumn();
+                    } else {
+                        $unimportedCount = $totalReports;
+                    }
+                } else {
+                    $unimportedCount = $totalReports;
+                }
+            } catch (PDOException $e) {
+                $hasAccounting = false;
+            }
+            ?>
+            
+            <?php if ($hasAccounting && $unimportedCount > 0): ?>
+            <div class="alert alert-info" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(59,130,246,0.05) 100%); border: 2px solid rgba(59,130,246,0.3); padding: 16px; border-radius: 8px;">
+                <div style="display: flex; align-items: start; gap: 12px;">
+                    <span style="font-size: 24px;">💡</span>
+                    <div style="flex: 1;">
+                        <h3 style="margin: 0 0 8px 0; color: #3b82f6;">Import Financial Records to Accounting</h3>
+                        <p style="margin: 0 0 12px 0; color: var(--text); font-size: 14px; line-height: 1.6;">
+                            You have <strong><?php echo number_format($unimportedCount); ?></strong> field report(s) that haven't been imported into the accounting system yet.
+                        </p>
+                        <p style="margin: 0; color: var(--text); font-size: 14px; line-height: 1.6;">
+                            Click <strong>"Import to Accounting"</strong> to create journal entries for all financial transactions in these reports. This will enable you to generate proper accounting reports like Profit & Loss and Balance Sheet.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <?php elseif ($hasAccounting && $unimportedCount == 0): ?>
+            <div class="alert alert-success" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(16,185,129,0.1) 0%, rgba(16,185,129,0.05) 100%); border: 2px solid rgba(16,185,129,0.3); padding: 16px; border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 24px;">✅</span>
+                    <div style="flex: 1;">
+                        <strong style="color: #10b981;">All financial records have been imported to accounting!</strong>
+                        <p style="margin: 8px 0 0 0; color: var(--text); font-size: 14px;">
+                            View your accounting reports in the <a href="accounting.php" style="color: #3b82f6; font-weight: 600;">Accounting module</a>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <!-- Financial Summary -->
             <div class="stats-grid">
@@ -157,7 +231,7 @@ require_once '../includes/header.php';
             <div class="dashboard-card">
                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 style="margin: 0;">Financial Reports (<?php echo count($reports); ?>)</h2>
-                    <a href="../api/export.php?module=reports&format=csv&date_from=<?php echo urlencode($startDate); ?>&date_to=<?php echo urlencode($endDate); ?>" 
+                    <a href="<?php echo api_url('export.php', ['module' => 'reports', 'format' => 'csv', 'date_from' => $startDate, 'date_to' => $endDate]); ?>" 
                        class="btn btn-primary">Export CSV</a>
                 </div>
                 <div class="table-responsive">
@@ -264,5 +338,79 @@ require_once '../includes/header.php';
                     </div>
                 </div>
             </div>
+
+<script>
+function importToAccounting() {
+    if (!confirm('This will import all field report financial records into the accounting system as journal entries. This may take a few minutes depending on the number of reports. Continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('importBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Importing...';
+    
+    // Get CSRF token
+    const csrfToken = document.querySelector('input[name="csrf_token"]')?.value || 
+                      document.querySelector('meta[name="csrf-token"]')?.content || '';
+    
+    fetch('../api/initialize-accounting.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: 'csrf_token=' + encodeURIComponent(csrfToken)
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        
+        if (data.success) {
+            const summary = data.results || {};
+            const fieldReports = summary.field_reports || {};
+            const processed = fieldReports.processed || 0;
+            const skipped = fieldReports.skipped || 0;
+            const errors = fieldReports.errors || [];
+            
+            let message = '✅ Import completed successfully!\n\n';
+            message += 'Field Reports:\n';
+            message += '- Processed: ' + processed + '\n';
+            message += '- Skipped (already imported): ' + skipped + '\n';
+            
+            if (data.results?.loans?.processed > 0) {
+                message += '\nLoans:\n';
+                message += '- Processed: ' + (data.results.loans.processed || 0) + '\n';
+            }
+            
+            if (data.results?.materials?.processed > 0) {
+                message += '\nMaterials:\n';
+                message += '- Processed: ' + (data.results.materials.processed || 0) + '\n';
+            }
+            
+            if (errors.length > 0) {
+                message += '\n\n⚠️ Errors (' + errors.length + '):\n';
+                message += errors.slice(0, 5).join('\n');
+                if (errors.length > 5) {
+                    message += '\n... and ' + (errors.length - 5) + ' more';
+                }
+            }
+            
+            message += '\n\nView your accounting entries in the Accounting module.';
+            
+            alert(message);
+            window.location.reload();
+        } else {
+            alert('❌ Error: ' + (data.message || 'Import failed. Please try again.'));
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        console.error('Error:', error);
+        alert('❌ Error importing to accounting. Please check the console for details.');
+    });
+}
+</script>
 
 <?php require_once '../includes/footer.php'; ?>

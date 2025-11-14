@@ -9,6 +9,9 @@ $consentManager = new ConsentManager();
 $userId = $_SESSION['user_id'] ?? null;
 $userEmail = $_SESSION['email'] ?? null;
 
+// Determine if we're in a module (for path resolution)
+$is_module = isset($_SESSION['is_module']) ? $_SESSION['is_module'] : (basename(dirname($_SERVER['PHP_SELF'])) === 'modules');
+
 // Check if user has already consented
 $hasConsented = false;
 if ($userId || $userEmail) {
@@ -74,7 +77,7 @@ function acceptCookies() {
     
     // Record in database if user is logged in
     <?php if ($userId || $userEmail): ?>
-    fetch('<?php echo $is_module ? '' : '../'; ?>api/record-consent.php', {
+    fetch('<?php echo ($is_module ?? false) ? '../api/record-consent.php' : 'api/record-consent.php'; ?>', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -92,7 +95,7 @@ function declineCookies() {
     document.cookie = 'cookie_consent=declined; path=/; max-age=' + (30 * 24 * 60 * 60) + '; SameSite=Strict';
     
     <?php if ($userId || $userEmail): ?>
-    fetch('<?php echo $is_module ? '' : '../'; ?>api/record-consent.php', {
+    fetch('<?php echo ($is_module ?? false) ? '../api/record-consent.php' : 'api/record-consent.php'; ?>', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({

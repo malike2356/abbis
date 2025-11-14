@@ -30,6 +30,19 @@ $rigs = $pdo->query("SELECT id, rig_name FROM rigs WHERE status = 'active' ORDER
 $clients = $pdo->query("SELECT id, client_name FROM clients ORDER BY client_name LIMIT 100")->fetchAll();
 $jobTypes = ['direct' => 'Direct', 'subcontract' => 'Subcontract'];
 
+// Set AI Assistant context for analytics (before header is included)
+// Note: Header will use these variables when including the AI assistant panel
+$aiContext = [
+    'entity_type' => 'analytics_dashboard',
+    'entity_id' => '',
+    'entity_label' => 'Analytics Dashboard' . ($activeTab ? ' · ' . strtoupper($activeTab) : ''),
+];
+$aiQuickPrompts = [
+    'Summarise performance trends this period',
+    'Highlight anomalies that need investigation',
+    'Recommend actions to improve utilisation',
+];
+
 require_once '../includes/header.php';
 ?>
 
@@ -351,6 +364,11 @@ require_once '../includes/header.php';
         <button class="tab <?php echo $activeTab === 'financial' ? 'active' : ''; ?>" onclick="switchTab('financial')">💰 Financial Analysis</button>
         <button class="tab <?php echo $activeTab === 'operational' ? 'active' : ''; ?>" onclick="switchTab('operational')">⚙️ Operational Metrics</button>
         <button class="tab <?php echo $activeTab === 'performance' ? 'active' : ''; ?>" onclick="switchTab('performance')">🏆 Performance Analysis</button>
+        <button class="tab <?php echo $activeTab === 'pos' ? 'active' : ''; ?>" onclick="switchTab('pos')">🛒 POS System</button>
+        <button class="tab <?php echo $activeTab === 'cms' ? 'active' : ''; ?>" onclick="switchTab('cms')">🌐 CMS & Ecommerce</button>
+        <button class="tab <?php echo $activeTab === 'inventory' ? 'active' : ''; ?>" onclick="switchTab('inventory')">📦 Inventory</button>
+        <button class="tab <?php echo $activeTab === 'accounting' ? 'active' : ''; ?>" onclick="switchTab('accounting')">📚 Accounting</button>
+        <button class="tab <?php echo $activeTab === 'crm' ? 'active' : ''; ?>" onclick="switchTab('crm')">👥 CRM</button>
         <button class="tab <?php echo $activeTab === 'forecast' ? 'active' : ''; ?>" onclick="switchTab('forecast')">🔮 Forecast & Trends</button>
     </div>
 
@@ -533,6 +551,161 @@ require_once '../includes/header.php';
         </div>
     </div>
 
+    <!-- POS System Tab -->
+    <div id="pos-tab" class="tab-content <?php echo $activeTab === 'pos' ? 'active' : ''; ?>">
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">💰 POS Sales Revenue Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('posSalesTrend')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="posSalesTrendChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-grid">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">💳 Payment Methods Breakdown</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('posPaymentMethods')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="posPaymentMethodsChart" height="80"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">🏪 Store Performance</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('posStorePerformance')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="posStorePerformanceChart" height="80"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-grid">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">🛍️ Top Selling Products</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('posTopProducts')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="posTopProductsChart" height="80"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">👤 Cashier Performance</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('posCashierPerformance')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="posCashierPerformanceChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- CMS & Ecommerce Tab -->
+    <div id="cms-tab" class="tab-content <?php echo $activeTab === 'cms' ? 'active' : ''; ?>">
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">🛒 CMS Orders Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('cmsOrdersTrend')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="cmsOrdersTrendChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">📋 Quote Requests Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('cmsQuoteRequests')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="cmsQuoteRequestsChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory Tab -->
+    <div id="inventory-tab" class="tab-content <?php echo $activeTab === 'inventory' ? 'active' : ''; ?>">
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">📊 Inventory Value Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('inventoryValueTrend')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="inventoryValueTrendChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">🔧 Material Usage by Type</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('inventoryMaterialUsage')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="inventoryMaterialUsageChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Accounting Tab -->
+    <div id="accounting-tab" class="tab-content <?php echo $activeTab === 'accounting' ? 'active' : ''; ?>">
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">📝 Journal Entries Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('accountingJournalEntries')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="accountingJournalEntriesChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">💼 Account Balances by Type</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('accountingAccountBalances')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="accountingAccountBalancesChart" height="80"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- CRM Tab -->
+    <div id="crm-tab" class="tab-content <?php echo $activeTab === 'crm' ? 'active' : ''; ?>">
+        <div class="chart-grid full-width">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">📞 CRM Follow-ups Trend</h3>
+                    <div class="chart-actions">
+                        <button class="btn-icon-small" onclick="exportChart('crmFollowups')" title="Export">💾</button>
+                    </div>
+                </div>
+                <canvas id="crmFollowupsChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+
     <!-- Forecast & Trends Tab -->
     <div id="forecast-tab" class="tab-content <?php echo $activeTab === 'forecast' ? 'active' : ''; ?>">
         <div class="chart-grid full-width">
@@ -556,13 +729,88 @@ require_once '../includes/header.php';
     window.analyticsInitializing = false;
     window.analyticsInitialized = false;
     
-    function checkAndInitialize() {
+    // Define initializeAnalytics function early so it's available when checkAndInitialize is called
+    window.initializeAnalytics = function() {
+        // Prevent multiple initializations
+        if (window.analyticsInitialized || window.analyticsInitializing) {
+            console.log('Analytics already initialized or initializing, skipping...');
+            return;
+        }
+        
+        window.analyticsInitializing = true;
+        
+        // Check if Chart.js loaded
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js is not loaded');
+            window.analyticsInitializing = false;
+            return;
+        }
+        
+        // Check if AdvancedAnalytics class is available
+        if (typeof window.AdvancedAnalytics === 'undefined') {
+            console.error('AdvancedAnalytics class is not available');
+            window.analyticsInitializing = false;
+            return;
+        }
+        
+        try {
+            // Get parameters from URL or use defaults
+            const urlParams = new URLSearchParams(window.location.search);
+            const startDate = urlParams.get('start_date') || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+            const endDate = urlParams.get('end_date') || new Date().toISOString().split('T')[0];
+            const groupBy = urlParams.get('group_by') || 'month';
+            const rigId = urlParams.get('rig_id') || '';
+            const clientId = urlParams.get('client_id') || '';
+            const jobType = urlParams.get('job_type') || '';
+            
+            // Initialize analytics
+            window.analytics = new window.AdvancedAnalytics({
+                startDate: startDate,
+                endDate: endDate,
+                groupBy: groupBy,
+                rigId: rigId,
+                clientId: clientId,
+                jobType: jobType
+            });
+            
+            // Initialize and load data
+            window.analytics.init().then(() => {
+                window.analyticsInitialized = true;
+                window.analyticsInitializing = false;
+                console.log('Analytics initialized successfully');
+            }).catch(error => {
+                console.error('Error initializing analytics:', error);
+                window.analyticsInitializing = false;
+                const container = document.getElementById('metricsContainer');
+                if (container) {
+                    container.innerHTML = 
+                        '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error: ' + 
+                        (error.message || 'Failed to initialize analytics') + '. Please refresh the page.</div>';
+                }
+            });
+        } catch (error) {
+            console.error('Error in initializeAnalytics:', error);
+            window.analyticsInitializing = false;
+            const container = document.getElementById('metricsContainer');
+            if (container) {
+                container.innerHTML = 
+                    '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error: ' + 
+                    (error.message || 'Failed to initialize analytics') + '. Please refresh the page.</div>';
+            }
+        }
+    }
+    
+    window.checkAndInitialize = function() {
         if (window.analyticsInitialized || window.analyticsInitializing) {
             return; // Already initialized or in progress
         }
         
         if (window.chartJsLoaded && window.analyticsJsLoaded && typeof Chart !== 'undefined' && typeof window.AdvancedAnalytics !== 'undefined') {
-            initializeAnalytics();
+            if (typeof window.initializeAnalytics === 'function') {
+                window.initializeAnalytics();
+            } else {
+                console.error('initializeAnalytics function not found');
+            }
         }
     }
 </script>
@@ -583,74 +831,106 @@ require_once '../includes/header.php';
 </script>
 
 <script>
-    // Wait for all scripts to load before initializing
-    function initializeAnalytics() {
-        // Prevent multiple initializations
-        if (window.analyticsInitialized || window.analyticsInitializing) {
-            console.log('Analytics already initialized or initializing, skipping...');
-            return;
-        }
-        
-        window.analyticsInitializing = true;
-        
-        // Check if Chart.js loaded
-        if (typeof Chart === 'undefined') {
-            window.analyticsInitializing = false;
-            console.error('Chart.js not loaded!');
-            const errorMsg = 'Chart.js library not loaded. ' + 
-                           (navigator.onLine ? 'Please check your internet connection and refresh the page.' : 'You are offline. Please check your internet connection.');
-            document.getElementById('metricsContainer').innerHTML = '<div class="loading-spinner" style="color: var(--danger);">⚠️ ' + errorMsg + '</div>';
-            return;
-        }
-        
-        // Check if AdvancedAnalytics class loaded
-        if (typeof window.AdvancedAnalytics === 'undefined') {
-            window.analyticsInitializing = false;
-            console.error('AdvancedAnalytics class not found!');
-            console.error('Chart.js loaded:', typeof Chart !== 'undefined');
-            console.error('Available window objects:', Object.keys(window).filter(k => k.toLowerCase().includes('analytics') || k.toLowerCase().includes('chart')));
-            document.getElementById('metricsContainer').innerHTML = '<div class="loading-spinner" style="color: var(--danger);">⚠️ Analytics JavaScript not loaded. Please check browser console for errors and refresh the page.</div>';
-            return;
-        }
-        
-        try {
-            // Create analytics instance
-            window.analytics = new window.AdvancedAnalytics({
-                startDate: '<?php echo $startDate; ?>',
-                endDate: '<?php echo $endDate; ?>',
-                groupBy: '<?php echo $groupBy; ?>',
-                rigId: '<?php echo $selectedRig; ?>',
-                clientId: '<?php echo $selectedClient; ?>',
-                jobType: '<?php echo $selectedJobType; ?>'
-            });
+    // Override initializeAnalytics to use PHP variables when available
+    (function() {
+        const originalInit = window.initializeAnalytics || function() {};
+        window.initializeAnalytics = function() {
+            // Prevent multiple initializations
+            if (window.analyticsInitialized || window.analyticsInitializing) {
+                console.log('Analytics already initialized or initializing, skipping...');
+                return;
+            }
             
-            // Initialize and load tab data based on active tab
-            const activeTab = '<?php echo $activeTab; ?>';
+            window.analyticsInitializing = true;
             
-            window.analytics.init().then(() => {
-                console.log('Analytics initialized successfully');
-                window.analyticsInitialized = true;
+            // Check if Chart.js loaded
+            if (typeof Chart === 'undefined') {
                 window.analyticsInitializing = false;
-                if (activeTab !== 'overview') {
-                    window.analytics.loadTabData(activeTab);
+                console.error('Chart.js not loaded!');
+                const errorMsg = 'Chart.js library not loaded. ' + 
+                               (navigator.onLine ? 'Please check your internet connection and refresh the page.' : 'You are offline. Please check your internet connection.');
+                const container = document.getElementById('metricsContainer');
+                if (container) {
+                    container.innerHTML = '<div class="loading-spinner" style="color: var(--danger);">⚠️ ' + errorMsg + '</div>';
                 }
-            }).catch(error => {
+                return;
+            }
+            
+            // Check if AdvancedAnalytics class loaded
+            if (typeof window.AdvancedAnalytics === 'undefined') {
                 window.analyticsInitializing = false;
-                console.error('Error initializing analytics:', error);
+                console.error('AdvancedAnalytics class not found!');
+                const container = document.getElementById('metricsContainer');
+                if (container) {
+                    container.innerHTML = '<div class="loading-spinner" style="color: var(--danger);">⚠️ Analytics JavaScript not loaded. Please check browser console for errors and refresh the page.</div>';
+                }
+                return;
+            }
+            
+            try {
+                // Use PHP variables (they're always set, but may be empty strings)
+                const phpStartDate = '<?php echo $startDate; ?>';
+                const phpEndDate = '<?php echo $endDate; ?>';
+                const phpGroupBy = '<?php echo $groupBy; ?>';
+                const phpRigId = '<?php echo $selectedRig; ?>';
+                const phpClientId = '<?php echo $selectedClient; ?>';
+                const phpJobType = '<?php echo $selectedJobType; ?>';
+                
+                // Get URL parameters as fallback
+                const urlParams = new URLSearchParams(window.location.search);
+                
+                // Use PHP values if they exist and are not empty, otherwise use URL params or defaults
+                const startDate = phpStartDate || urlParams.get('start_date') || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+                const endDate = phpEndDate || urlParams.get('end_date') || new Date().toISOString().split('T')[0];
+                const groupBy = phpGroupBy || urlParams.get('group_by') || 'month';
+                const rigId = phpRigId || urlParams.get('rig_id') || '';
+                const clientId = phpClientId || urlParams.get('client_id') || '';
+                const jobType = phpJobType || urlParams.get('job_type') || '';
+                
+                // Create analytics instance
+                window.analytics = new window.AdvancedAnalytics({
+                    startDate: startDate,
+                    endDate: endDate,
+                    groupBy: groupBy,
+                    rigId: rigId,
+                    clientId: clientId,
+                    jobType: jobType
+                });
+                
+                // Initialize and load tab data based on active tab
+                const activeTab = '<?php echo isset($activeTab) ? $activeTab : "overview"; ?>';
+                
+                window.analytics.init().then(() => {
+                    console.log('Analytics initialized successfully');
+                    window.analyticsInitialized = true;
+                    window.analyticsInitializing = false;
+                    if (activeTab && activeTab !== 'overview' && typeof window.analytics.loadTabData === 'function') {
+                        window.analytics.loadTabData(activeTab);
+                    }
+                }).catch(error => {
+                    window.analyticsInitializing = false;
+                    console.error('Error initializing analytics:', error);
+                    console.error('Error stack:', error.stack);
+                    const container = document.getElementById('metricsContainer');
+                    if (container) {
+                        container.innerHTML = 
+                            '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error loading analytics: ' + 
+                            (error.message || 'Unknown error') + '. Please refresh the page or check browser console.</div>';
+                    }
+                });
+            } catch (error) {
+                window.analyticsInitializing = false;
+                console.error('Error creating analytics instance:', error);
                 console.error('Error stack:', error.stack);
-                document.getElementById('metricsContainer').innerHTML = 
-                    '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error loading analytics: ' + 
-                    (error.message || 'Unknown error') + '. Please refresh the page or check browser console.</div>';
-            });
-        } catch (error) {
-            window.analyticsInitializing = false;
-            console.error('Error creating analytics instance:', error);
-            console.error('Error stack:', error.stack);
-            document.getElementById('metricsContainer').innerHTML = 
-                '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error: ' + 
-                (error.message || 'Failed to initialize analytics') + '. Please refresh the page.</div>';
-        }
-    }
+                const container = document.getElementById('metricsContainer');
+                if (container) {
+                    container.innerHTML = 
+                        '<div class="loading-spinner" style="color: var(--danger);">⚠️ Error: ' + 
+                        (error.message || 'Failed to initialize analytics') + '. Please refresh the page.</div>';
+                }
+            }
+        };
+    })();
     
     // Try multiple initialization strategies
     if (document.readyState === 'loading') {
@@ -693,7 +973,9 @@ require_once '../includes/header.php';
     }, 500);
 </script>
 
-    function switchTab(tabName) {
+<script>
+    // Make all functions globally accessible for onclick handlers
+    window.switchTab = function(tabName) {
         // Update URL without reload
         const url = new URL(window.location);
         url.searchParams.set('type', tabName);
@@ -706,10 +988,21 @@ require_once '../includes/header.php';
         // Find and activate the clicked tab
         const tabs = document.querySelectorAll('.tab');
         tabs.forEach(tab => {
-            if (tab.textContent.includes(tabName === 'overview' ? 'Overview' : 
-                                         tabName === 'financial' ? 'Financial' :
-                                         tabName === 'operational' ? 'Operational' :
-                                         tabName === 'performance' ? 'Performance' : 'Forecast')) {
+            const tabText = tab.textContent.toLowerCase();
+            const tabMap = {
+                'overview': 'overview',
+                'financial': 'financial',
+                'operational': 'operational',
+                'performance': 'performance',
+                'pos': 'pos',
+                'cms': 'cms',
+                'inventory': 'inventory',
+                'accounting': 'accounting',
+                'crm': 'crm',
+                'forecast': 'forecast'
+            };
+            const expectedText = tabMap[tabName] || '';
+            if (tabText.includes(expectedText)) {
                 tab.classList.add('active');
             }
         });
@@ -725,11 +1018,11 @@ require_once '../includes/header.php';
         }
     }
 
-    function resetFilters() {
+    window.resetFilters = function() {
         window.location.href = 'analytics.php';
     }
 
-    function setDateRange(range) {
+    window.setDateRange = function(range) {
         const today = new Date();
         let start, end;
         
@@ -774,34 +1067,44 @@ require_once '../includes/header.php';
                 break;
         }
         
-        document.querySelector('input[name="start_date"]').value = start;
-        document.querySelector('input[name="end_date"]').value = end;
-        document.getElementById('filterForm').submit();
+        const startInput = document.querySelector('input[name="start_date"]');
+        const endInput = document.querySelector('input[name="end_date"]');
+        const filterForm = document.getElementById('filterForm');
+        
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+        if (filterForm) filterForm.submit();
     }
 
-    function exportChart(chartId) {
+    window.exportChart = function(chartId) {
         if (window.analytics) {
             window.analytics.exportChart(chartId);
         }
     }
 
-    function toggleFullscreen(chartId) {
+    window.toggleFullscreen = function(chartId) {
         if (window.analytics) {
             window.analytics.toggleFullscreen(chartId);
         }
     }
 
-    function refreshAllCharts() {
+    window.refreshAllCharts = function() {
         if (window.analytics) {
             window.analytics.refreshAll();
         }
     }
 
-    function exportDashboard(format) {
+    window.exportDashboard = function(format) {
         if (window.analytics) {
             window.analytics.exportDashboard(format);
         }
     }
 </script>
 
-<?php require_once '../includes/footer.php'; ?>
+<?php
+// Note: AI assistant panel is already included in header.php for all pages
+// The context variables were set before the header was included (around line 33-44),
+// so the panel will use the correct context for the analytics dashboard.
+
+require_once '../includes/footer.php';
+?>

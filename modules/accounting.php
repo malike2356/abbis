@@ -10,7 +10,7 @@ require_once '../includes/auth.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
-$auth->requireRole(ROLE_ADMIN);
+$auth->requirePermission('finance.access');
 
 $pdo = getDBConnection();
 $action = $_GET['action'] ?? 'dashboard';

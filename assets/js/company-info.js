@@ -8,12 +8,23 @@
     
     // Wait for DOM
     document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('companyInfoForm');
-        
-        if (!form) {
-            return; // Form doesn't exist on this page
+        // Handle company info form
+        const companyForm = document.getElementById('companyInfoForm');
+        if (companyForm) {
+            setupFormHandler(companyForm);
         }
         
+        // Handle receipt template form
+        const receiptForm = document.getElementById('receiptTemplateForm');
+        if (receiptForm) {
+            setupFormHandler(receiptForm);
+        }
+    });
+    
+    /**
+     * Setup form handler for any form
+     */
+    function setupFormHandler(form) {
         // Handle form submission
         form.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -60,7 +71,10 @@
                 // Handle result
                 if (result.success) {
                     // Success
-                    showMessage(result.message || 'Company information saved successfully!', 'success');
+                    const successMsg = form.id === 'receiptTemplateForm' 
+                        ? 'Receipt settings saved successfully!'
+                        : 'Company information saved successfully!';
+                    showMessage(result.message || successMsg, 'success');
                     
                     // Reload page after 2 seconds to show updated info
                     setTimeout(function() {
@@ -68,7 +82,10 @@
                     }, 2000);
                 } else {
                     // Error
-                    showMessage(result.message || 'Failed to save company information', 'error');
+                    const errorMsg = form.id === 'receiptTemplateForm'
+                        ? 'Failed to save receipt settings'
+                        : 'Failed to save company information';
+                    showMessage(result.message || errorMsg, 'error');
                     
                     // Re-enable button
                     if (submitBtn) {
@@ -106,8 +123,10 @@
         messageDiv.style.cssText = 'margin: 20px 0; padding: 15px; border-radius: 8px;';
         messageDiv.textContent = message;
         
-        // Insert before form
-        const form = document.getElementById('companyInfoForm');
+        // Insert before form (try both forms)
+        const companyForm = document.getElementById('companyInfoForm');
+        const receiptForm = document.getElementById('receiptTemplateForm');
+        const form = companyForm || receiptForm;
         if (form && form.parentNode) {
             form.parentNode.insertBefore(messageDiv, form);
             

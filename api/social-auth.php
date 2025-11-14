@@ -8,6 +8,7 @@ require_once '../config/app.php';
 require_once '../config/security.php';
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/crypto.php';
 require_once '../includes/helpers.php';
 
 // CORS headers for social login redirects
@@ -35,11 +36,7 @@ function showConfigError($provider, $configPage) {
     }
     
     // Show HTML error page for browser requests
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
+    $baseUrl = app_url();
     
     ?>
     <!DOCTYPE html>
@@ -147,22 +144,22 @@ function showConfigError($provider, $configPage) {
                         <li>Create a new project or select an existing one</li>
                         <li>Enable the Google+ API</li>
                         <li>Go to "Credentials" → "Create Credentials" → "OAuth 2.0 Client ID"</li>
-                        <li>Add authorized redirect URI: <code><?php echo (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . $baseUrl; ?>/api/social-auth.php?action=google_auth</code></li>
+                        <li>Add authorized redirect URI: <code><?php echo app_url('api/social-auth.php?action=google_auth'); ?></code></li>
                         <li>Copy your Client ID and Client Secret</li>
                         <li>Configure them in ABBIS System Settings</li>
                     <?php elseif ($provider === 'facebook'): ?>
                         <li>Go to <a href="https://developers.facebook.com/" target="_blank">Facebook Developers</a></li>
                         <li>Create a new app</li>
                         <li>Add "Facebook Login" product</li>
-                        <li>Configure OAuth redirect URI: <code><?php echo (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . $baseUrl; ?>/api/social-auth.php?action=facebook_auth</code></li>
+                        <li>Configure OAuth redirect URI: <code><?php echo app_url('api/social-auth.php?action=facebook_auth'); ?></code></li>
                         <li>Copy your App ID and App Secret</li>
                         <li>Configure them in ABBIS System Settings</li>
                     <?php endif; ?>
                 </ol>
             </div>
             
-            <a href="<?php echo $baseUrl; ?><?php echo $configPage; ?>" class="btn">Go to System Configuration →</a>
-            <a href="<?php echo $baseUrl; ?>/login.php" class="btn btn-secondary">← Back to Login</a>
+            <a href="<?php echo app_url(ltrim($configPage, '/')); ?>" class="btn">Go to System Configuration →</a>
+            <a href="<?php echo app_url('login.php'); ?>" class="btn btn-secondary">← Back to Login</a>
         </div>
     </body>
     </html>
@@ -215,7 +212,7 @@ function handleGoogleAuth() {
     if (empty($code)) {
         // Redirect to Google OAuth
         $clientId = getConfigValue('google_client_id');
-        $redirectUri = getConfigValue('google_redirect_uri', APP_URL . '/api/social-auth.php?action=google_auth');
+        $redirectUri = getConfigValue('google_redirect_uri', app_url('api/social-auth.php?action=google_auth'));
         
         if (empty($clientId)) {
             showConfigError('google', '/modules/social-auth-config.php');
@@ -238,7 +235,7 @@ function handleGoogleAuth() {
     // Exchange code for tokens
     $clientId = getConfigValue('google_client_id');
     $clientSecret = getConfigValue('google_client_secret');
-    $redirectUri = getConfigValue('google_redirect_uri', APP_URL . '/api/social-auth.php?action=google_auth');
+    $redirectUri = getConfigValue('google_redirect_uri', app_url('api/social-auth.php?action=google_auth'));
     
     if (empty($clientId) || empty($clientSecret)) {
         showConfigError('google', '/modules/social-auth-config.php');
@@ -373,14 +370,8 @@ function handleGoogleAuth() {
     $_SESSION['login_time'] = time();
     $_SESSION['last_activity'] = time();
     
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
-    
     // Redirect to dashboard after successful login
-    header('Location: ' . $baseUrl . '/modules/dashboard.php');
+    header('Location: ' . app_url('modules/dashboard.php'));
     exit;
 }
 
@@ -393,7 +384,7 @@ function handleFacebookAuth() {
     $code = $_GET['code'] ?? $_POST['code'] ?? '';
     if (empty($code)) {
         $appId = getConfigValue('facebook_app_id');
-        $redirectUri = getConfigValue('facebook_redirect_uri', APP_URL . '/api/social-auth.php?action=facebook_auth');
+        $redirectUri = getConfigValue('facebook_redirect_uri', app_url('api/social-auth.php?action=facebook_auth'));
         
         if (empty($appId)) {
             showConfigError('facebook', '/modules/social-auth-config.php');
@@ -414,7 +405,7 @@ function handleFacebookAuth() {
     // Exchange code for token and get user info
     $appId = getConfigValue('facebook_app_id');
     $appSecret = getConfigValue('facebook_app_secret');
-    $redirectUri = getConfigValue('facebook_redirect_uri', APP_URL . '/api/social-auth.php?action=facebook_auth');
+    $redirectUri = getConfigValue('facebook_redirect_uri', app_url('api/social-auth.php?action=facebook_auth'));
     
     if (empty($appId) || empty($appSecret)) {
         showConfigError('facebook', '/modules/social-auth-config.php');
@@ -625,7 +616,21 @@ function getConfigValue($key, $default = '') {
         $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key = ?");
         $stmt->execute([$key]);
         $result = $stmt->fetch();
-        return $result ? $result['config_value'] : $default;
+        if (!$result) {
+            return $default;
+        }
+
+        $value = $result['config_value'];
+        if (Crypto::isEncrypted($value)) {
+            try {
+                $value = Crypto::decrypt($value);
+            } catch (RuntimeException $e) {
+                error_log('Config decrypt failed for key ' . $key . ': ' . $e->getMessage());
+                return $default;
+            }
+        }
+
+        return $value !== '' ? $value : $default;
     } catch (PDOException $e) {
         return $default;
     }

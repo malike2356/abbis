@@ -14,12 +14,18 @@ if ($auth->isLoggedIn()) {
 
 $error = null;
 $success = null;
+$lockoutInfo = null;
 
 // Get base URL
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
+$baseUrl = app_url();
+
+// Check lockout status if username is provided (before form submission)
+$checkUsername = $_POST['username'] ?? $_GET['username'] ?? '';
+if (!empty($checkUsername)) {
+    $username = trim($checkUsername);
+    $lockoutInfo = $auth->getLockoutStatus($username);
+} else {
+    $lockoutInfo = null;
 }
 
 // Handle login
@@ -40,21 +46,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $result = $auth->login($username, $password);
                     if ($result['success']) {
-                        // Record privacy policy consent
-                        require_once 'includes/consent-manager.php';
-                        $consentManager = new ConsentManager();
-                        $userId = $_SESSION['user_id'];
-                        $userEmail = $_SESSION['email'] ?? '';
-                        $consentManager->recordConsent($userId, $userEmail, 'privacy_policy', '1.0', true);
+                        // Check if Super Admin login
+                        if (isset($result['super_admin']) && $result['super_admin']) {
+                            // Super Admin login - redirect to dashboard
+                            $redirect = $_SESSION['redirect_after_login'] ?? 'modules/dashboard.php';
+                            unset($_SESSION['redirect_after_login']);
+                            redirect($redirect);
+                        }
+                        
+                        // Record privacy policy consent (skip for super admin)
+                        if (isset($_SESSION['user_id']) && $_SESSION['user_id'] > 0) {
+                            require_once 'includes/consent-manager.php';
+                            $consentManager = new ConsentManager();
+                            $userId = $_SESSION['user_id'];
+                            $userEmail = $_SESSION['email'] ?? '';
+                            $consentManager->recordConsent($userId, $userEmail, 'privacy_policy', '1.0', true);
+                        }
                         
                         // Check user role for routing
                         $userRole = $_SESSION['role'] ?? null;
-                        $isAdmin = ($userRole === ROLE_ADMIN);
+                        $isAdmin = ($userRole === ROLE_ADMIN || $userRole === ROLE_SUPER_ADMIN);
                         
-                        // Check if user wants to go to CMS or ABBIS (for admins)
+                        // Check if user wants to go to CMS, POS, Client Portal, or ABBIS (for admins)
                         $destination = $_POST['destination'] ?? '';
                         
-                        // For admins: check if they want CMS, otherwise go to ABBIS
+                        // For admins: check if they want CMS, POS, Client Portal, or ABBIS
                         if ($isAdmin && $destination === 'cms') {
                             // Try to find corresponding CMS user and create session
                             require_once 'cms/admin/auth.php';
@@ -77,16 +93,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $pdo->prepare("UPDATE cms_users SET last_login = NOW(), login_count = login_count + 1 WHERE id = ?")->execute([$cmsUser['id']]);
                                 } catch (Exception $e) {}
                                 
-                                redirect($baseUrl . '/cms/admin/index.php');
+                                redirect(app_url('cms/admin/index.php'));
                             } else {
                                 // No CMS user found, redirect to ABBIS
                                 redirect('modules/dashboard.php');
                             }
+                        } elseif ($isAdmin && $destination === 'pos') {
+                            // Admin going to POS
+                            if ($auth->userHasPermission('pos.access')) {
+                                redirect(app_url('pos/index.php'));
+                            } else {
+                                redirect('modules/dashboard.php');
+                            }
+                        } elseif ($isAdmin && $destination === 'client_portal') {
+                            // Admin or Super Admin going to Client Portal - use SSO
+                            require_once 'includes/sso.php';
+                            $sso = new SSO();
+                            // Use admin role for SSO even if super admin
+                            $ssoRole = ($userRole === ROLE_SUPER_ADMIN) ? ROLE_ADMIN : $userRole;
+                            $clientPortalUrl = $sso->getClientPortalLoginURL(
+                                $_SESSION['user_id'],
+                                $_SESSION['username'],
+                                $ssoRole
+                            );
+                            
+                            if ($clientPortalUrl) {
+                                redirect($clientPortalUrl);
+                            } else {
+                                // SSO failed, redirect to ABBIS
+                                redirect('modules/dashboard.php');
+                            }
                         } elseif ($isAdmin) {
-                            // Admin going to ABBIS (default)
+                            // Admin or Super Admin going to ABBIS (default)
                             $redirect = $_SESSION['redirect_after_login'] ?? 'modules/dashboard.php';
                             unset($_SESSION['redirect_after_login']);
                             redirect($redirect);
+                        } elseif ($userRole === ROLE_CLIENT) {
+                            // Client user - redirect to Client Portal
+                            redirect(app_url('client-portal/dashboard.php'));
                         } else {
                             // Non-admin user - check if they have CMS account and send there
                             require_once 'cms/admin/auth.php';
@@ -109,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $pdo->prepare("UPDATE cms_users SET last_login = NOW(), login_count = login_count + 1 WHERE id = ?")->execute([$cmsUser['id']]);
                                 } catch (Exception $e) {}
                                 
-                                redirect($baseUrl . '/cms/admin/index.php');
+                                redirect(app_url('cms/admin/index.php'));
                             } else {
                                 // No CMS account, but they have ABBIS account - redirect to ABBIS dashboard
                                 $redirect = $_SESSION['redirect_after_login'] ?? 'modules/dashboard.php';
@@ -471,11 +515,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 
                 <?php if ($error): ?>
-                    <div class="alert alert-error" style="margin-bottom: 20px;"><?php echo e($error); ?></div>
+                    <div class="alert alert-error" style="margin-bottom: 20px;">
+                        <?php echo e($error); ?>
+                        <?php if ($lockoutInfo && $lockoutInfo['is_locked']): ?>
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(239, 68, 68, 0.3);">
+                                <strong>Account Lockout Details:</strong>
+                                <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px;">
+                                    <li>Failed attempts: <?php echo $lockoutInfo['attempts']; ?> / <?php echo $lockoutInfo['max_attempts']; ?></li>
+                                    <?php if ($lockoutInfo['time_until_unlock']): ?>
+                                        <li>Account will unlock in: <strong><?php echo gmdate('H:i:s', $lockoutInfo['time_until_unlock']); ?></strong></li>
+                                        <li>Unlock time: <?php echo date('H:i:s', strtotime($lockoutInfo['unlock_time'])); ?></li>
+                                    <?php else: ?>
+                                        <li>Account is locked. Please wait 15 minutes or contact administrator.</li>
+                                    <?php endif; ?>
+                                    <?php if ($lockoutInfo['last_attempt']): ?>
+                                        <li>Last attempt: <?php echo date('M d, Y H:i:s', strtotime($lockoutInfo['last_attempt'])); ?></li>
+                                    <?php endif; ?>
+                                </ul>
+                                <div style="margin-top: 12px; font-size: 12px; color: rgba(239, 68, 68, 0.9);">
+                                    <strong>Need help?</strong> Contact your administrator or wait for the lockout period to expire.
+                                    <br>
+                                    <small>To unlock immediately, run: <code>php scripts/unlock-account.php admin</code></small>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 <?php endif; ?>
                 
                 <?php if ($success): ?>
                     <div class="alert alert-success" style="margin-bottom: 20px;"><?php echo e($success); ?></div>
+                <?php endif; ?>
+                
+                <?php if ($lockoutInfo && $lockoutInfo['is_locked'] && !$error): ?>
+                    <div class="alert alert-error" style="margin-bottom: 20px;">
+                        <strong>⚠️ Account Locked</strong>
+                        <p style="margin: 8px 0 0 0; font-size: 14px;">
+                            Your account has been temporarily locked due to <?php echo $lockoutInfo['attempts']; ?> failed login attempts.
+                        </p>
+                        <?php if ($lockoutInfo['time_until_unlock']): ?>
+                            <p style="margin: 8px 0 0 0; font-size: 14px;">
+                                <strong>Account will unlock in: <?php echo gmdate('H:i:s', $lockoutInfo['time_until_unlock']); ?></strong>
+                                <br>
+                                <small>Unlock time: <?php echo date('M d, Y H:i:s', strtotime($lockoutInfo['unlock_time'])); ?></small>
+                            </p>
+                        <?php else: ?>
+                            <p style="margin: 8px 0 0 0; font-size: 14px;">
+                                Please wait 15 minutes or contact your administrator.
+                            </p>
+                        <?php endif; ?>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(239, 68, 68, 0.3); font-size: 12px;">
+                            <strong>Unlock Options:</strong>
+                            <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+                                <li>Wait 15 minutes for automatic unlock</li>
+                                <li>Contact your administrator</li>
+                                <li>Run unlock script: <code>php scripts/unlock-account.php admin</code></li>
+                            </ul>
+                        </div>
+                    </div>
+                <?php elseif ($lockoutInfo && !$lockoutInfo['is_locked'] && $lockoutInfo['attempts'] > 0): ?>
+                    <div class="alert alert-warning" style="margin-bottom: 20px; background: #fef3c7; border-color: #f59e0b; color: #92400e;">
+                        <strong>⚠️ Warning</strong>
+                        <p style="margin: 8px 0 0 0; font-size: 14px;">
+                            You have <?php echo $lockoutInfo['attempts']; ?> failed login attempt(s). 
+                            After <?php echo $lockoutInfo['remaining_attempts']; ?> more failed attempt(s), your account will be locked for 15 minutes.
+                        </p>
+                    </div>
                 <?php endif; ?>
                 
                 <form method="POST" action="" class="login-form" id="loginForm">
@@ -502,7 +606,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         required 
                         autofocus
                         autocomplete="username"
-                        placeholder="Enter your username">
+                        placeholder="Enter your username"
+                        value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>"
+                        onblur="checkLockoutStatus()">
+                    <?php if ($lockoutInfo && !$lockoutInfo['is_locked'] && $lockoutInfo['attempts'] > 0): ?>
+                        <small style="color: #f59e0b; font-size: 12px; display: block; margin-top: 4px;">
+                            ⚠️ <?php echo $lockoutInfo['attempts']; ?> failed attempt(s). 
+                            <?php echo $lockoutInfo['remaining_attempts']; ?> attempt(s) remaining before lockout.
+                        </small>
+                    <?php endif; ?>
                 </div>
                 
                 <div class="form-group">
@@ -523,9 +635,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <select name="destination" id="destination" class="form-control" style="font-size: 14px;">
                         <option value="">ABBIS System (Default)</option>
                         <option value="cms">CMS Admin</option>
+                        <option value="pos">POS System</option>
+                        <option value="client_portal">Client Portal</option>
                     </select>
                     <small style="color: #64748b; font-size: 11px; display: block; margin-top: 4px;">
-                        Admins can choose destination. Non-admins auto-routed.
+                        Admins can choose destination. Non-admins auto-routed. Clients auto-routed to Client Portal.
                     </small>
                 </div>
                 
@@ -542,7 +656,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
                 <!-- CMS Link -->
                 <div class="cms-link" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                    <a href="<?php echo $baseUrl; ?>/cms/">
+                    <a href="<?php echo app_url('cms/'); ?>">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                             <polyline points="9 22 9 12 15 12 15 22"></polyline>
@@ -623,6 +737,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
     
     <script>
+        function checkLockoutStatus() {
+            const username = document.getElementById('username').value.trim();
+            if (!username) return;
+            
+            // Check lockout status via AJAX
+            fetch('<?php echo app_url('api/check-lockout-status.php'); ?>?username=' + encodeURIComponent(username))
+                .then(response => response.json())
+                .then(data => {
+                    if (data.is_locked) {
+                        // Show lockout message
+                        const existingError = document.querySelector('.alert-error');
+                        if (existingError && existingError.textContent.includes('locked')) {
+                            return; // Already showing lockout message
+                        }
+                        
+                        const lockoutDiv = document.createElement('div');
+                        lockoutDiv.className = 'alert alert-error';
+                        lockoutDiv.style.marginBottom = '20px';
+                        lockoutDiv.innerHTML = `
+                            <strong>⚠️ Account Locked</strong>
+                            <p style="margin: 8px 0 0 0;">Your account has been temporarily locked due to ${data.attempts} failed login attempts.</p>
+                            ${data.time_until_unlock ? `
+                                <p style="margin: 8px 0 0 0;"><strong>Account will unlock in: ${formatTime(data.time_until_unlock)}</strong></p>
+                            ` : ''}
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(239, 68, 68, 0.3); font-size: 12px;">
+                                <strong>Unlock Options:</strong>
+                                <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+                                    <li>Wait 15 minutes for automatic unlock</li>
+                                    <li>Contact your administrator</li>
+                                    <li>Run unlock script: <code>php scripts/unlock-account.php ${username}</code></li>
+                                </ul>
+                            </div>
+                        `;
+                        const form = document.getElementById('loginForm');
+                        form.parentNode.insertBefore(lockoutDiv, form);
+                    }
+                })
+                .catch(error => {
+                    // Silently fail - lockout check is optional
+                    console.error('Lockout check failed:', error);
+                });
+        }
+        
+        function formatTime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return [hours, minutes, secs].map(v => v < 10 ? '0' + v : v).join(':');
+        }
+        
         function togglePhoneLogin() {
             const container = document.getElementById('phoneLoginContainer');
             container.classList.toggle('active');

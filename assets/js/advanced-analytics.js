@@ -89,6 +89,20 @@ class AdvancedAnalytics {
             
             const data = result.data || {};
             
+            // Ensure all numeric values are properly converted to numbers and handle NaN
+            const profitMargin = parseFloat(data.profit_margin);
+            const profitMarginValue = (isNaN(profitMargin) ? 0 : profitMargin);
+            const totalRevenue = parseFloat(data.total_revenue);
+            const totalRevenueValue = (isNaN(totalRevenue) ? 0 : totalRevenue);
+            const totalProfit = parseFloat(data.total_profit);
+            const totalProfitValue = (isNaN(totalProfit) ? 0 : totalProfit);
+            const totalJobs = parseInt(data.total_jobs);
+            const totalJobsValue = (isNaN(totalJobs) ? 0 : totalJobs);
+            const avgProfitPerJob = parseFloat(data.avg_profit_per_job);
+            const avgProfitPerJobValue = (isNaN(avgProfitPerJob) ? 0 : avgProfitPerJob);
+            const totalExpenses = parseFloat(data.total_expenses);
+            const totalExpensesValue = (isNaN(totalExpenses) ? 0 : totalExpenses);
+            
             // Also get comparative data (but don't fail if it fails)
             let compResult = { success: false, data: { changes: {} } };
             try {
@@ -103,37 +117,37 @@ class AdvancedAnalytics {
             const metrics = [
                 {
                     label: 'Total Revenue',
-                    value: this.formatCurrency(data.total_revenue || 0),
+                    value: this.formatCurrency(totalRevenueValue),
                     change: compResult.success && compResult.data && compResult.data.changes ? compResult.data.changes.revenue_change : null,
                     icon: '💰'
                 },
                 {
                     label: 'Net Profit',
-                    value: this.formatCurrency(data.total_profit || 0),
+                    value: this.formatCurrency(totalProfitValue),
                     change: compResult.success && compResult.data && compResult.data.changes ? compResult.data.changes.profit_change : null,
                     icon: '📈'
                 },
                 {
                     label: 'Total Jobs',
-                    value: this.formatNumber(data.total_jobs || 0),
+                    value: this.formatNumber(totalJobsValue),
                     change: compResult.success && compResult.data && compResult.data.changes ? compResult.data.changes.jobs_change : null,
                     icon: '📊'
                 },
                 {
                     label: 'Profit Margin',
-                    value: (data.profit_margin || 0).toFixed(2) + '%',
+                    value: profitMarginValue.toFixed(2) + '%',
                     change: null,
                     icon: '💎'
                 },
                 {
                     label: 'Avg Profit/Job',
-                    value: this.formatCurrency(data.avg_profit_per_job || 0),
+                    value: this.formatCurrency(avgProfitPerJobValue),
                     change: null,
                     icon: '🎯'
                 },
                 {
                     label: 'Total Expenses',
-                    value: this.formatCurrency(data.total_expenses || 0),
+                    value: this.formatCurrency(totalExpensesValue),
                     change: null,
                     icon: '💸'
                 }
@@ -191,6 +205,21 @@ class AdvancedAnalytics {
                 break;
             case 'performance':
                 await this.loadPerformanceCharts();
+                break;
+            case 'pos':
+                await this.loadPosCharts();
+                break;
+            case 'cms':
+                await this.loadCmsCharts();
+                break;
+            case 'inventory':
+                await this.loadInventoryCharts();
+                break;
+            case 'accounting':
+                await this.loadAccountingCharts();
+                break;
+            case 'crm':
+                await this.loadCrmCharts();
                 break;
             case 'forecast':
                 await this.loadForecastChart();
@@ -1295,6 +1324,800 @@ class AdvancedAnalytics {
             this.charts.set('forecast', chart);
         } catch (error) {
             console.error('Error loading forecast:', error);
+        }
+    }
+
+    // POS Charts
+    async loadPosCharts() {
+        await Promise.all([
+            this.loadPosSalesTrendChart(),
+            this.loadPosPaymentMethodsChart(),
+            this.loadPosStorePerformanceChart(),
+            this.loadPosTopProductsChart(),
+            this.loadPosCashierPerformanceChart()
+        ]);
+    }
+
+    async loadPosSalesTrendChart() {
+        try {
+            const data = await this.fetchData('pos_sales_trend');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const sales = data.map(item => parseFloat(item.total_sales || 0));
+            const cash = data.map(item => parseFloat(item.cash_sales || 0));
+            const card = data.map(item => parseFloat(item.card_sales || 0));
+            const momo = data.map(item => parseFloat(item.momo_sales || 0));
+
+            const ctx = document.getElementById('posSalesTrendChart');
+            if (!ctx) return;
+
+            if (this.charts.has('posSalesTrend')) {
+                this.charts.get('posSalesTrend').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total Sales',
+                            data: sales,
+                            borderColor: this.colors.primary,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.1),
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Cash',
+                            data: cash,
+                            borderColor: this.colors.success,
+                            backgroundColor: this.alphaColor(this.colors.success, 0.1),
+                            borderWidth: 2,
+                            fill: false
+                        },
+                        {
+                            label: 'Card',
+                            data: card,
+                            borderColor: this.colors.warning,
+                            backgroundColor: this.alphaColor(this.colors.warning, 0.1),
+                            borderWidth: 2,
+                            fill: false
+                        },
+                        {
+                            label: 'Mobile Money',
+                            data: momo,
+                            borderColor: this.colors.purple,
+                            backgroundColor: this.alphaColor(this.colors.purple, 0.1),
+                            borderWidth: 2,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: (context) => context.dataset.label + ': ' + this.formatCurrency(context.parsed.y)
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('posSalesTrend', chart);
+        } catch (error) {
+            console.error('Error loading POS sales trend:', error);
+        }
+    }
+
+    async loadPosPaymentMethodsChart() {
+        try {
+            const data = await this.fetchData('pos_payment_methods');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => item.payment_method.toUpperCase());
+            const amounts = data.map(item => parseFloat(item.total_amount || 0));
+
+            const ctx = document.getElementById('posPaymentMethodsChart');
+            if (!ctx) return;
+
+            if (this.charts.has('posPaymentMethods')) {
+                this.charts.get('posPaymentMethods').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: amounts,
+                        backgroundColor: this.generateColors(labels.length, 0.8)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'right' },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const total = amounts.reduce((a, b) => a + b, 0);
+                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                    return context.label + ': ' + this.formatCurrency(context.parsed) + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('posPaymentMethods', chart);
+        } catch (error) {
+            console.error('Error loading POS payment methods:', error);
+        }
+    }
+
+    async loadPosStorePerformanceChart() {
+        try {
+            const data = await this.fetchData('pos_store_performance');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => item.store_name || 'Unknown');
+            const sales = data.map(item => parseFloat(item.total_sales || 0));
+
+            const ctx = document.getElementById('posStorePerformanceChart');
+            if (!ctx) return;
+
+            if (this.charts.has('posStorePerformance')) {
+                this.charts.get('posStorePerformance').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Total Sales',
+                        data: sales,
+                        backgroundColor: this.generateColors(labels.length, 0.7)
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => this.formatCurrency(context.parsed.x)
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('posStorePerformance', chart);
+        } catch (error) {
+            console.error('Error loading POS store performance:', error);
+        }
+    }
+
+    async loadPosTopProductsChart() {
+        try {
+            const data = await this.fetchData('pos_top_products');
+            if (!data || data.length === 0) return;
+
+            const top10 = data.slice(0, 10);
+            const labels = top10.map(item => item.name || item.sku);
+            const revenue = top10.map(item => parseFloat(item.total_revenue || 0));
+
+            const ctx = document.getElementById('posTopProductsChart');
+            if (!ctx) return;
+
+            if (this.charts.has('posTopProducts')) {
+                this.charts.get('posTopProducts').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Revenue',
+                        data: revenue,
+                        backgroundColor: this.generateColors(labels.length, 0.7)
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => this.formatCurrency(context.parsed.x)
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('posTopProducts', chart);
+        } catch (error) {
+            console.error('Error loading POS top products:', error);
+        }
+    }
+
+    async loadPosCashierPerformanceChart() {
+        try {
+            const data = await this.fetchData('pos_cashier_performance');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => item.cashier_name || 'Unknown');
+            const sales = data.map(item => parseFloat(item.total_sales || 0));
+
+            const ctx = document.getElementById('posCashierPerformanceChart');
+            if (!ctx) return;
+
+            if (this.charts.has('posCashierPerformance')) {
+                this.charts.get('posCashierPerformance').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Total Sales',
+                        data: sales,
+                        backgroundColor: this.generateColors(labels.length, 0.7)
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => this.formatCurrency(context.parsed.x)
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('posCashierPerformance', chart);
+        } catch (error) {
+            console.error('Error loading POS cashier performance:', error);
+        }
+    }
+
+    // CMS Charts
+    async loadCmsCharts() {
+        await Promise.all([
+            this.loadCmsOrdersTrendChart(),
+            this.loadCmsQuoteRequestsChart()
+        ]);
+    }
+
+    async loadCmsOrdersTrendChart() {
+        try {
+            const data = await this.fetchData('cms_orders_trend');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const revenue = data.map(item => parseFloat(item.total_revenue || 0));
+            const orders = data.map(item => parseInt(item.order_count || 0));
+
+            const ctx = document.getElementById('cmsOrdersTrendChart');
+            if (!ctx) return;
+
+            if (this.charts.has('cmsOrdersTrend')) {
+                this.charts.get('cmsOrdersTrend').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Revenue',
+                            data: revenue,
+                            borderColor: this.colors.primary,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.1),
+                            borderWidth: 3,
+                            fill: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Orders',
+                            data: orders,
+                            type: 'bar',
+                            backgroundColor: this.alphaColor(this.colors.success, 0.5),
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: {
+                            position: 'left',
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        },
+                        y1: {
+                            position: 'right',
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('cmsOrdersTrend', chart);
+        } catch (error) {
+            console.error('Error loading CMS orders trend:', error);
+        }
+    }
+
+    async loadCmsQuoteRequestsChart() {
+        try {
+            const data = await this.fetchData('cms_quote_requests');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const total = data.map(item => parseInt(item.request_count || 0));
+            const converted = data.map(item => parseInt(item.converted_count || 0));
+            const pending = data.map(item => parseInt(item.pending_count || 0));
+
+            const ctx = document.getElementById('cmsQuoteRequestsChart');
+            if (!ctx) return;
+
+            if (this.charts.has('cmsQuoteRequests')) {
+                this.charts.get('cmsQuoteRequests').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total Requests',
+                            data: total,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.7)
+                        },
+                        {
+                            label: 'Converted',
+                            data: converted,
+                            backgroundColor: this.alphaColor(this.colors.success, 0.7)
+                        },
+                        {
+                            label: 'Pending',
+                            data: pending,
+                            backgroundColor: this.alphaColor(this.colors.warning, 0.7)
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            this.charts.set('cmsQuoteRequests', chart);
+        } catch (error) {
+            console.error('Error loading CMS quote requests:', error);
+        }
+    }
+
+    // Inventory Charts
+    async loadInventoryCharts() {
+        await Promise.all([
+            this.loadInventoryValueTrendChart(),
+            this.loadInventoryMaterialUsageChart()
+        ]);
+    }
+
+    async loadInventoryValueTrendChart() {
+        try {
+            const data = await this.fetchData('inventory_value_trend');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const value = data.map(item => parseFloat(item.total_inventory_value || 0));
+            const added = data.map(item => parseFloat(item.inventory_added || 0));
+            const used = data.map(item => parseFloat(item.inventory_used || 0));
+
+            const ctx = document.getElementById('inventoryValueTrendChart');
+            if (!ctx) return;
+
+            if (this.charts.has('inventoryValueTrend')) {
+                this.charts.get('inventoryValueTrend').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Inventory Value',
+                            data: value,
+                            borderColor: this.colors.primary,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.1),
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Added',
+                            data: added,
+                            borderColor: this.colors.success,
+                            backgroundColor: this.alphaColor(this.colors.success, 0.1),
+                            borderWidth: 2,
+                            fill: false
+                        },
+                        {
+                            label: 'Used',
+                            data: used,
+                            borderColor: this.colors.danger,
+                            backgroundColor: this.alphaColor(this.colors.danger, 0.1),
+                            borderWidth: 2,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: (context) => context.dataset.label + ': ' + this.formatCurrency(context.parsed.y)
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('inventoryValueTrend', chart);
+        } catch (error) {
+            console.error('Error loading inventory value trend:', error);
+        }
+    }
+
+    async loadInventoryMaterialUsageChart() {
+        try {
+            const data = await this.fetchData('inventory_material_usage');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => item.material_type);
+            const quantity = data.map(item => parseFloat(item.quantity_used || 0));
+            const cost = data.map(item => parseFloat(item.total_cost || 0));
+
+            const ctx = document.getElementById('inventoryMaterialUsageChart');
+            if (!ctx) return;
+
+            if (this.charts.has('inventoryMaterialUsage')) {
+                this.charts.get('inventoryMaterialUsage').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Quantity Used',
+                            data: quantity,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.7),
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Total Cost',
+                            data: cost,
+                            type: 'line',
+                            borderColor: this.colors.warning,
+                            backgroundColor: this.alphaColor(this.colors.warning, 0.1),
+                            borderWidth: 3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: {
+                            position: 'left',
+                            beginAtZero: true
+                        },
+                        y1: {
+                            position: 'right',
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('inventoryMaterialUsage', chart);
+        } catch (error) {
+            console.error('Error loading inventory material usage:', error);
+        }
+    }
+
+    // Accounting Charts
+    async loadAccountingCharts() {
+        await Promise.all([
+            this.loadAccountingJournalEntriesChart(),
+            this.loadAccountingAccountBalancesChart()
+        ]);
+    }
+
+    async loadAccountingJournalEntriesChart() {
+        try {
+            const data = await this.fetchData('accounting_journal_entries');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const debits = data.map(item => parseFloat(item.total_debits || 0));
+            const credits = data.map(item => parseFloat(item.total_credits || 0));
+
+            const ctx = document.getElementById('accountingJournalEntriesChart');
+            if (!ctx) return;
+
+            if (this.charts.has('accountingJournalEntries')) {
+                this.charts.get('accountingJournalEntries').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Debits',
+                            data: debits,
+                            backgroundColor: this.alphaColor(this.colors.danger, 0.7)
+                        },
+                        {
+                            label: 'Credits',
+                            data: credits,
+                            backgroundColor: this.alphaColor(this.colors.success, 0.7)
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: (context) => context.dataset.label + ': ' + this.formatCurrency(context.parsed.y)
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('accountingJournalEntries', chart);
+        } catch (error) {
+            console.error('Error loading accounting journal entries:', error);
+        }
+    }
+
+    async loadAccountingAccountBalancesChart() {
+        try {
+            const data = await this.fetchData('accounting_account_balances');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => item.account_type);
+            const balances = data.map(item => parseFloat(item.total_balance || 0));
+
+            const ctx = document.getElementById('accountingAccountBalancesChart');
+            if (!ctx) return;
+
+            if (this.charts.has('accountingAccountBalances')) {
+                this.charts.get('accountingAccountBalances').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Balance',
+                        data: balances,
+                        backgroundColor: this.generateColors(labels.length, 0.7)
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => this.formatCurrency(context.parsed.x)
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (value) => this.formatCurrency(value).replace('GHS ', '')
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.charts.set('accountingAccountBalances', chart);
+        } catch (error) {
+            console.error('Error loading accounting account balances:', error);
+        }
+    }
+
+    // CRM Charts
+    async loadCrmCharts() {
+        await this.loadCrmFollowupsChart();
+    }
+
+    async loadCrmFollowupsChart() {
+        try {
+            const data = await this.fetchData('crm_followups');
+            if (!data || data.length === 0) return;
+
+            const labels = data.map(item => this.formatPeriod(item.period));
+            const total = data.map(item => parseInt(item.followup_count || 0));
+            const completed = data.map(item => parseInt(item.completed_count || 0));
+            const scheduled = data.map(item => parseInt(item.scheduled_count || 0));
+            const overdue = data.map(item => parseInt(item.overdue_count || 0));
+
+            const ctx = document.getElementById('crmFollowupsChart');
+            if (!ctx) return;
+
+            if (this.charts.has('crmFollowups')) {
+                this.charts.get('crmFollowups').destroy();
+            }
+
+            const chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total',
+                            data: total,
+                            backgroundColor: this.alphaColor(this.colors.primary, 0.7)
+                        },
+                        {
+                            label: 'Completed',
+                            data: completed,
+                            backgroundColor: this.alphaColor(this.colors.success, 0.7)
+                        },
+                        {
+                            label: 'Scheduled',
+                            data: scheduled,
+                            backgroundColor: this.alphaColor(this.colors.warning, 0.7)
+                        },
+                        {
+                            label: 'Overdue',
+                            data: overdue,
+                            backgroundColor: this.alphaColor(this.colors.danger, 0.7)
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            this.charts.set('crmFollowups', chart);
+        } catch (error) {
+            console.error('Error loading CRM followups:', error);
         }
     }
 

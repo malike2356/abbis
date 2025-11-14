@@ -63,11 +63,7 @@ $methods = $pdo->query("SELECT * FROM cms_payment_methods ORDER BY is_active DES
 
 $configStmt = $pdo->query("SELECT config_value FROM system_config WHERE config_key='company_name'");
 $companyName = $configStmt->fetchColumn() ?: 'CMS Admin';
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_url();
 ?>
 <!DOCTYPE html>
 <html lang="en">

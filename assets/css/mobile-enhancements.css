@@ -74,15 +74,15 @@
     }
     
     /* Navigation improvements */
-    .header-content {
+    .app-header__top {
         flex-wrap: wrap;
     }
-    
-    .nav-menu {
-        width: 100%;
-        order: 3;
+
+    .app-header__search {
+        flex: 1 1 100%;
+        max-width: none;
     }
-    
+
     /* Export buttons */
     .export-buttons {
         flex-wrap: wrap;

@@ -3,6 +3,10 @@
 
 USE `abbis_3_2`;
 
+-- Expand role enum to support accountant, HR, and field manager roles
+ALTER TABLE `users`
+MODIFY COLUMN `role` enum('admin','manager','supervisor','clerk','accountant','hr','field_manager') DEFAULT 'clerk';
+
 -- Cache table for dashboard stats
 CREATE TABLE IF NOT EXISTS `cache_stats` (
   `id` int(11) NOT NULL AUTO_INCREMENT,

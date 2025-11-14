@@ -12,6 +12,7 @@ require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('finance.access');
 
 $pdo = getDBConnection();
 
@@ -34,8 +35,57 @@ if (isset($_POST['update_payment_status']) && isset($_POST['payroll_id'])) {
     $payrollId = (int)$_POST['payroll_id'];
     $paidToday = isset($_POST['paid_today']) ? 1 : 0;
     try {
+        // Get current payroll entry
+        $currentStmt = $pdo->prepare("SELECT pe.*, fr.report_date FROM payroll_entries pe LEFT JOIN field_reports fr ON pe.report_id = fr.id WHERE pe.id = ?");
+        $currentStmt->execute([$payrollId]);
+        $currentPayroll = $currentStmt->fetch();
+        
+        $oldPaidStatus = $currentPayroll ? (int)$currentPayroll['paid_today'] : 0;
+        
         $stmt = $pdo->prepare("UPDATE payroll_entries SET paid_today = ? WHERE id = ?");
         $stmt->execute([$paidToday, $payrollId]);
+        
+        // Automatically track payroll payment in accounting if status changed to paid - runs for EVERY payment
+        if ($paidToday == 1 && $oldPaidStatus == 0 && $currentPayroll) {
+            try {
+                // Ensure accounting tables exist
+                try {
+                    $pdo->query("SELECT 1 FROM chart_of_accounts LIMIT 1");
+                } catch (PDOException $e) {
+                    // Initialize if needed
+                    $migrationFile = __DIR__ . '/../database/accounting_migration.sql';
+                    if (file_exists($migrationFile)) {
+                        $sql = file_get_contents($migrationFile);
+                        if ($sql) {
+                            foreach (preg_split('/;\s*\n/', $sql) as $stmt) {
+                                $stmt = trim($stmt);
+                                if ($stmt) {
+                                    try {
+                                        $pdo->exec($stmt);
+                                    } catch (PDOException $e2) {}
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                require_once '../includes/AccountingAutoTracker.php';
+                $accountingTracker = new AccountingAutoTracker($pdo);
+                $result = $accountingTracker->trackPayrollPayment($payrollId, [
+                    'worker_name' => $currentPayroll['worker_name'] ?? '',
+                    'amount' => floatval($currentPayroll['amount'] ?? 0),
+                    'payment_date' => $currentPayroll['report_date'] ?? date('Y-m-d'),
+                    'created_by' => $_SESSION['user_id'] ?? null
+                ]);
+                
+                if ($result) {
+                    error_log("Accounting: Auto-tracked payroll payment ID {$payrollId}");
+                }
+            } catch (Exception $e) {
+                error_log("Accounting auto-tracking error for payroll payment ID {$payrollId}: " . $e->getMessage());
+            }
+        }
+        
         $_SESSION['success'] = 'Payment status updated successfully';
     } catch (PDOException $e) {
         $_SESSION['error'] = 'Error updating payment status: ' . $e->getMessage();
@@ -604,7 +654,7 @@ require_once '../includes/header.php';
         <p style="font-size: 14px; color: #64748b; margin: 0;">Manage worker payments, track payroll records, and monitor payment status</p>
     </div>
     <div>
-        <a href="../modules/field-reports.php" class="btn btn-primary" style="padding: 10px 20px; font-weight: 500; font-size: 14px;">Create Report</a>
+        <a href="<?php echo module_url('field-reports.php'); ?>" class="btn btn-primary" style="padding: 10px 20px; font-weight: 500; font-size: 14px;">Create Report</a>
     </div>
 </div>
 

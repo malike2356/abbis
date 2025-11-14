@@ -108,6 +108,79 @@ function handleGet($pdo, $action) {
     }
 }
 
+/**
+ * Validate role compatibility
+ * Business rule: Driller cannot also be Spanner Boy or Table Boy (mutually exclusive)
+ */
+function validateRoleCompatibility($pdo, $workerId, $newRoleName) {
+    // Normalize role names for comparison (case-insensitive)
+    $newRole = strtolower(trim($newRoleName));
+    
+    // Define incompatible role groups
+    $drillerRoles = ['driller'];
+    $assistantRoles = ['spanner boy', 'spanner', 'table boy', 'table'];
+    
+    // Check if new role is a driller role
+    $isDrillerRole = false;
+    foreach ($drillerRoles as $driller) {
+        if (strpos($newRole, $driller) !== false) {
+            $isDrillerRole = true;
+            break;
+        }
+    }
+    
+    // Check if new role is an assistant role
+    $isAssistantRole = false;
+    foreach ($assistantRoles as $assistant) {
+        if (strpos($newRole, $assistant) !== false) {
+            $isAssistantRole = true;
+            break;
+        }
+    }
+    
+    // Get worker's existing roles
+    $stmt = $pdo->prepare("
+        SELECT role_name 
+        FROM worker_role_assignments 
+        WHERE worker_id = ?
+    ");
+    $stmt->execute([$workerId]);
+    $existingRoles = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    // Also check workers.role column (legacy)
+    $stmt = $pdo->prepare("SELECT role FROM workers WHERE id = ?");
+    $stmt->execute([$workerId]);
+    $primaryRole = $stmt->fetchColumn();
+    if ($primaryRole) {
+        $existingRoles[] = $primaryRole;
+    }
+    
+    // Check for conflicts
+    foreach ($existingRoles as $existingRole) {
+        $existing = strtolower(trim($existingRole));
+        
+        // If worker is already a driller, cannot add assistant role
+        if ($isAssistantRole) {
+            foreach ($drillerRoles as $driller) {
+                if (strpos($existing, $driller) !== false) {
+                    throw new Exception('A Driller cannot also be a Spanner Boy or Table Boy. These roles are mutually exclusive - the Driller operates the machine while the Spanner/Table Boy is their direct assistant.');
+                }
+            }
+        }
+        
+        // If worker is already an assistant, cannot add driller role
+        if ($isDrillerRole) {
+            foreach ($assistantRoles as $assistant) {
+                if (strpos($existing, $assistant) !== false) {
+                    throw new Exception('A Spanner Boy or Table Boy cannot also be a Driller. These roles are mutually exclusive - the Driller operates the machine while the Spanner/Table Boy is their direct assistant.');
+                }
+            }
+        }
+    }
+    
+    return true;
+}
+
 function handlePost($pdo, $action) {
     if (!CSRF::validateToken($_POST['csrf_token'] ?? '')) {
         throw new Exception('Invalid security token');
@@ -123,6 +196,9 @@ function handlePost($pdo, $action) {
             if (!$workerId || !$roleName) {
                 throw new Exception('Worker ID and Role Name are required');
             }
+            
+            // Validate role compatibility
+            validateRoleCompatibility($pdo, $workerId, $roleName);
             
             // Check if already assigned
             $checkStmt = $pdo->prepare("SELECT id FROM worker_role_assignments WHERE worker_id = ? AND role_name = ?");
@@ -158,6 +234,7 @@ function handlePost($pdo, $action) {
             $id = intval($_POST['id'] ?? 0);
             $isPrimary = isset($_POST['is_primary']) ? intval($_POST['is_primary']) : 0;
             $defaultRate = isset($_POST['default_rate']) ? floatval($_POST['default_rate']) : null;
+            $newRoleName = trim($_POST['role_name'] ?? ''); // Allow role name update
             
             if (!$id) {
                 throw new Exception('Assignment ID is required');
@@ -172,22 +249,47 @@ function handlePost($pdo, $action) {
                 throw new Exception('Assignment not found');
             }
             
+            // If role name is being changed, validate compatibility
+            if ($newRoleName && $newRoleName !== $assignment['role_name']) {
+                validateRoleCompatibility($pdo, $assignment['worker_id'], $newRoleName);
+            }
+            
             // If setting as primary, unset other primary roles
             if ($isPrimary) {
                 $updateStmt = $pdo->prepare("UPDATE worker_role_assignments SET is_primary = 0 WHERE worker_id = ? AND id != ?");
                 $updateStmt->execute([$assignment['worker_id'], $id]);
                 
-                // Update workers table primary role
+                // Update workers table primary role (use new role name if changed, otherwise current)
+                $roleToSet = $newRoleName ? $newRoleName : $assignment['role_name'];
                 $updateWorkerStmt = $pdo->prepare("UPDATE workers SET role = ? WHERE id = ?");
-                $updateWorkerStmt->execute([$assignment['role_name'], $assignment['worker_id']]);
+                $updateWorkerStmt->execute([$roleToSet, $assignment['worker_id']]);
             }
+            
+            // Build update query based on what's being updated
+            $updates = [];
+            $params = [];
+            
+            if ($newRoleName && $newRoleName !== $assignment['role_name']) {
+                $updates[] = "role_name = ?";
+                $params[] = $newRoleName;
+            }
+            
+            $updates[] = "is_primary = ?";
+            $params[] = $isPrimary;
+            
+            $updates[] = "default_rate = ?";
+            $params[] = $defaultRate;
+            
+            $updates[] = "updated_at = CURRENT_TIMESTAMP";
+            
+            $params[] = $id;
             
             $stmt = $pdo->prepare("
                 UPDATE worker_role_assignments 
-                SET is_primary = ?, default_rate = ?, updated_at = CURRENT_TIMESTAMP
+                SET " . implode(', ', $updates) . "
                 WHERE id = ?
             ");
-            $stmt->execute([$isPrimary, $defaultRate, $id]);
+            $stmt->execute($params);
             
             echo json_encode([
                 'success' => true,

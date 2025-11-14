@@ -5,6 +5,9 @@
 .env.local
 config/database.php
 config/local.php
+config/deployment.php
+config/secrets/
+config/super-admin.php
 
 # Storage and logs
 storage/logs/*

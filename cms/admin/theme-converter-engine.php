@@ -10,6 +10,8 @@ class ThemeConverter {
     private $conversions = [];
     private $filesConverted = 0;
     private $isWordPress = false;
+    private $themeSlug = '';
+    private $primaryTemplatePath = null;
     
     public function __construct($pdo) {
         $this->pdo = $pdo;
@@ -53,7 +55,9 @@ class ThemeConverter {
                 $themesDir = dirname(__DIR__) . '/themes/' . $themeSlug;
             }
             mkdir($themesDir, 0755, true);
+            $this->themeSlug = $themeSlug;
             $this->themeDir = $themesDir;
+            $this->prepareThemeDirectories($themesDir);
             
             // Copy and convert files
             $this->convertFiles($themeRoot, $themesDir);
@@ -62,7 +66,8 @@ class ThemeConverter {
             $this->createStyleHeader($themesDir, $themeInfo);
             
             // Create index.php if needed
-            $this->createIndexFile($themesDir, $themeRoot);
+            $this->createIndexFile($themeDir, $themeRoot);
+            $this->finalizeThemeStructure();
             
             // Install to database
             $this->installTheme($themeInfo, $themeSlug);
@@ -208,8 +213,11 @@ class ThemeConverter {
         );
         
         foreach ($iterator as $item) {
-            $destPath = $dest . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
-            
+            $relativePath = $iterator->getSubPathName();
+            $mappedRelative = $this->mapRelativePath($relativePath, $item);
+            $destPath = $this->themeDir . DIRECTORY_SEPARATOR . $mappedRelative;
+            $destPath = str_replace(['\\'], '/', $destPath);
+             
             if ($item->isDir()) {
                 if (!is_dir($destPath)) {
                     mkdir($destPath, 0755, true);
@@ -222,6 +230,11 @@ class ThemeConverter {
                 // Skip system files
                 if (in_array($name, ['.DS_Store', 'Thumbs.db', '.gitignore'])) {
                     continue;
+                }
+
+                $destDir = dirname($destPath);
+                if (!is_dir($destDir)) {
+                    mkdir($destDir, 0755, true);
                 }
                 
                 // Convert PHP files
@@ -236,6 +249,9 @@ class ThemeConverter {
                     $content = $this->convertHtmlFile($item->getRealPath());
                     $destPath = preg_replace('/\.html?$/', '.php', $destPath);
                     file_put_contents($destPath, $content);
+                    if ($this->primaryTemplatePath === null) {
+                        $this->primaryTemplatePath = $destPath;
+                    }
                     $this->filesConverted++;
                     $this->conversions[] = "Converted HTML to PHP: {$name}";
                 }
@@ -303,6 +319,8 @@ class ThemeConverter {
             $content = preg_replace($pattern, $replacement, $content);
         }
         
+        $content = $this->rewriteAssetPaths($content);
+
         // Add required variables at the top if WordPress functions were found
         if ($original !== $content || $this->isWordPress) {
             $header = "<?php\n";
@@ -312,11 +330,9 @@ class ThemeConverter {
             $header .= " */\n";
             $header .= "// Ensure required variables are set\n";
             $header .= "if (!isset(\$baseUrl)) {\n";
-            $header .= "    \$baseUrl = '/abbis3.2';\n";
-            $header .= "    if (defined('APP_URL')) {\n";
-            $header .= "        \$parsed = parse_url(APP_URL);\n";
-            $header .= "        \$baseUrl = \$parsed['path'] ?? '/abbis3.2';\n";
-            $header .= "    }\n";
+            $header .= "    \$rootPath = dirname(dirname(dirname(__DIR__)));\n";
+            $header .= "    require_once \$rootPath . '/config/app.php';\n";
+            $header .= "    \$baseUrl = app_url();\n";
             $header .= "}\n";
             $header .= "if (!isset(\$pdo)) {\n";
             $header .= "    \$rootPath = dirname(dirname(dirname(__DIR__)));\n";
@@ -372,6 +388,8 @@ class ThemeConverter {
             $content = preg_replace($pattern, $replacement, $content);
         }
         
+        $content = $this->rewriteAssetPaths($content);
+
         // Add PHP header
         $header = "<?php\n";
         $header .= "/**\n";
@@ -380,11 +398,9 @@ class ThemeConverter {
         $header .= " */\n";
         $header .= "// Ensure required variables are set\n";
         $header .= "if (!isset(\$baseUrl)) {\n";
-        $header .= "    \$baseUrl = '/abbis3.2';\n";
-        $header .= "    if (defined('APP_URL')) {\n";
-        $header .= "        \$parsed = parse_url(APP_URL);\n";
-        $header .= "        \$baseUrl = \$parsed['path'] ?? '/abbis3.2';\n";
-        $header .= "    }\n";
+        $header .= "    \$rootPath = dirname(dirname(dirname(__DIR__)));\n";
+        $header .= "    require_once \$rootPath . '/config/app.php';\n";
+        $header .= "    \$baseUrl = app_url();\n";
         $header .= "}\n";
         $header .= "if (!isset(\$siteTitle)) {\n";
         $header .= "    require_once __DIR__ . '/../../public/get-site-name.php';\n";
@@ -412,6 +428,7 @@ class ThemeConverter {
             }
         }
         
+        $content = $this->rewriteAssetPaths($content);
         return $content;
     }
     
@@ -477,6 +494,9 @@ class ThemeConverter {
                     $content = $this->convertHtmlFile($existing);
                 }
                 file_put_contents($indexPath, $content);
+                if ($this->primaryTemplatePath === null) {
+                    $this->primaryTemplatePath = $indexPath;
+                }
             } else {
                 // Create basic index.php
                 $content = <<<'PHP'
@@ -485,11 +505,9 @@ class ThemeConverter {
  * Theme Homepage Template
  */
 if (!isset($baseUrl)) {
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
+    $rootPath = dirname(dirname(dirname(__DIR__)));
+    require_once $rootPath . '/config/app.php';
+    $baseUrl = app_url();
 }
 if (!isset($siteTitle)) {
     require_once __DIR__ . '/../../public/get-site-name.php';
@@ -519,6 +537,9 @@ if (!isset($siteTitle)) {
 </html>
 PHP;
                 file_put_contents($indexPath, $content);
+                if ($this->primaryTemplatePath === null) {
+                    $this->primaryTemplatePath = $indexPath;
+                }
             }
             
             $this->filesConverted++;
@@ -568,6 +589,146 @@ PHP;
         return $text ?: 'theme';
     }
     
+    private function prepareThemeDirectories(string $themesDir): void
+    {
+        $structure = [
+            $themesDir . '/assets',
+            $themesDir . '/assets/css',
+            $themesDir . '/assets/js',
+            $themesDir . '/assets/images',
+            $themesDir . '/partials',
+            $themesDir . '/templates'
+        ];
+
+        foreach ($structure as $dir) {
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+        }
+    }
+
+    private function finalizeThemeStructure(): void
+    {
+        if ($this->primaryTemplatePath && file_exists($this->primaryTemplatePath)) {
+            $this->buildLayoutFromTemplate($this->primaryTemplatePath);
+        }
+    }
+
+    private function mapRelativePath(string $relativePath, \SplFileInfo $item): string
+    {
+        $relative = ltrim(str_replace(['\\'], '/', $relativePath), '/');
+        $ext = $item->isFile() ? strtolower($item->getExtension()) : '';
+        $firstSegment = strtok($relative, '/');
+        $assetExts = ['css','scss','sass','less','js','map','png','jpg','jpeg','gif','svg','webp','ico','ttf','otf','woff','woff2','eot','mp4','webm'];
+        $assetDirs = ['css','js','images','image','img','assets','fonts','media','static'];
+
+        if ($ext && in_array($ext, $assetExts, true)) {
+            if (stripos($relative, 'assets/') === 0) {
+                return $relative;
+            }
+            return 'assets/' . $relative;
+        }
+        if (!$ext && $firstSegment && in_array(strtolower($firstSegment), $assetDirs, true)) {
+            if (stripos($relative, 'assets/') === 0) {
+                return $relative;
+            }
+            return 'assets/' . $relative;
+        }
+        return $relative;
+    }
+
+    private function rewriteAssetPaths(string $content): string
+    {
+        if (trim($content) === '') {
+            return $content;
+        }
+
+        $pattern = '/(href|src)=("|\")(?!https?:|\/\/|data:|mailto:|tel:|#|<\?)([^"\
+]+)(\2)/i';
+        $themeBase = '<?php echo $themeBaseUrl; ?>/assets/';
+        return preg_replace_callback($pattern, function ($matches) use ($themeBase) {
+            $attr = $matches[1];
+            $quote = $matches[2];
+            $path = $matches[3];
+            $clean = ltrim($path, './');
+            while (strpos($clean, '../') === 0) {
+                $clean = substr($clean, 3);
+            }
+            $clean = preg_replace('#^assets/#i', '', $clean);
+            return sprintf('%s=%s%s%s%s', $attr, $quote, $themeBase, $clean, $quote);
+        }, $content);
+    }
+
+    private function buildLayoutFromTemplate(string $filePath): void
+    {
+        $content = file_get_contents($filePath);
+        if ($content === false) {
+            return;
+        }
+        $content = $this->rewriteAssetPaths($content);
+
+        $headerPart = '';
+        $footerPart = '';
+        $bodyBefore = '';
+        $bodyAfter = '';
+        $mainMarkup = '<?php echo $page[\'content\'] ?? $post[\'content\'] ?? \'\'; ?>';
+
+        if (preg_match('/<!DOCTYPE[\s\S]*?<body[^>]*>/i', $content, $headMatch)) {
+            $headerPart = $headMatch[0];
+            $bodyStartPos = strpos($content, $headMatch[0]) + strlen($headMatch[0]);
+            $bodyClosePos = stripos($content, '</body>');
+            $bodyInner = $bodyClosePos !== false ? substr($content, $bodyStartPos, $bodyClosePos - $bodyStartPos) : substr($content, $bodyStartPos);
+            $footerPart = $bodyClosePos !== false ? substr($content, $bodyClosePos) : '';
+
+            $mainMatcher = null;
+            if (preg_match('/<main[^>]*>[\s\S]*?<\/main>/i', $bodyInner, $mainMatch)) {
+                $mainMatcher = $mainMatch[0];
+            } elseif (preg_match('/<div[^>]+(id|class)="?(main|content|wrapper)[^>]*>[\s\S]*?<\/div>/i', $bodyInner, $mainMatch)) {
+                $mainMatcher = $mainMatch[0];
+            }
+
+            if ($mainMatcher) {
+                $bodyBefore = substr($bodyInner, 0, strpos($bodyInner, $mainMatcher));
+                $bodyAfter = substr($bodyInner, strpos($bodyInner, $mainMatcher) + strlen($mainMatcher));
+                $mainMarkup = $this->injectContentPlaceholder($mainMatcher);
+            } else {
+                $bodyBefore = $bodyInner;
+            }
+        }
+
+        $headerBootstrap = "<?php\n" .
+            "if (!isset(\$baseUrl)) {\n" .
+            "    \$rootPath = dirname(dirname(__DIR__));\n" .
+            "    require_once \$rootPath . '/config/app.php';\n" .
+            "    \$baseUrl = app_url();\n" .
+            "}\n" .
+            "if (!isset(\$themeBaseUrl)) {\n" .
+            "    \$themeBaseUrl = \$baseUrl . '/cms/themes/' . '" . $this->themeSlug . "';\n" .
+            "}\n" .
+            "?>\n";
+
+        $headerOutput = $headerBootstrap . $this->rewriteAssetPaths($headerPart . $bodyBefore);
+        $footerOutput = $this->rewriteAssetPaths($bodyAfter . $footerPart);
+
+        file_put_contents($this->themeDir . '/partials/header.php', $headerOutput);
+        file_put_contents($this->themeDir . '/partials/footer.php', $footerOutput);
+
+        $layoutContent = "<?php include __DIR__ . '/partials/header.php'; ?>\n\n" .
+            $mainMarkup . "\n\n<?php include __DIR__ . '/partials/footer.php'; ?>\n";
+        file_put_contents($filePath, $layoutContent);
+    }
+
+    private function injectContentPlaceholder(string $markup): string
+    {
+        if (preg_match('/(<main[^>]*>)([\s\S]*)(<\/main>)/i', $markup, $matches)) {
+            return $matches[1] . "<?php echo \$page['content'] ?? \$post['content'] ?? ''; ?>" . $matches[3];
+        }
+        if (preg_match('/(<div[^>]+(id|class)="?(main|content|wrapper)[^>]*>)([\s\S]*)(<\/div>)/i', $markup, $matches)) {
+            return $matches[1] . "<?php echo \$page['content'] ?? \$post['content'] ?? ''; ?>" . $matches[5];
+        }
+        return "<?php echo \$page['content'] ?? \$post['content'] ?? ''; ?>";
+    }
+
     /**
      * Cleanup temp files
      */

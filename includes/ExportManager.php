@@ -43,6 +43,11 @@ class ExportManager {
             case 'workers':
                 $this->exportWorkers($format, $filters);
                 break;
+            case 'analytics':
+            case 'financial':
+            case 'financial_overview':
+                $this->exportAnalytics($format, $filters);
+                break;
             default:
                 throw new Exception("Unknown export module: $module");
         }
@@ -301,6 +306,125 @@ class ExportManager {
     }
     
     /**
+     * Export analytics data
+     */
+    private function exportAnalytics($format, $filters) {
+        $dateFrom = $filters['date_from'] ?? date('Y-m-01');
+        $dateTo = $filters['date_to'] ?? date('Y-m-t');
+        $groupBy = $filters['group_by'] ?? 'month';
+        $rigId = $filters['rig_id'] ?? null;
+        $clientId = $filters['client_id'] ?? null;
+        $jobType = $filters['job_type'] ?? null;
+        
+        // Build WHERE clause
+        $where = ["fr.report_date BETWEEN ? AND ?"];
+        $params = [$dateFrom, $dateTo];
+        
+        if ($rigId) {
+            $where[] = "fr.rig_id = ?";
+            $params[] = $rigId;
+        }
+        if ($clientId) {
+            $where[] = "fr.client_id = ?";
+            $params[] = $clientId;
+        }
+        if ($jobType) {
+            $where[] = "fr.job_type = ?";
+            $params[] = $jobType;
+        }
+        
+        // Format date group based on group_by parameter
+        $dateGroup = $this->formatDateGroup($groupBy, 'fr.report_date');
+        
+        // Query for time series data grouped by period
+        $query = "SELECT 
+            $dateGroup as period,
+            COUNT(*) as job_count,
+            COALESCE(SUM(fr.total_income), 0) as total_revenue,
+            COALESCE(SUM(fr.total_expenses), 0) as total_expenses,
+            COALESCE(SUM(fr.net_profit), 0) as net_profit,
+            COALESCE(SUM(fr.total_wages), 0) as total_wages,
+            COALESCE(SUM(fr.materials_cost), 0) as materials_cost,
+            COALESCE(SUM(fr.materials_income), 0) as materials_income,
+            COALESCE(SUM(fr.total_depth), 0) as total_depth,
+            COALESCE(AVG(fr.total_depth), 0) as avg_depth,
+            COALESCE(SUM(fr.total_duration), 0) as total_duration,
+            COALESCE(AVG(fr.total_duration), 0) as avg_duration,
+            COALESCE(SUM(fr.total_rpm), 0) as total_rpm,
+            COALESCE(AVG(fr.net_profit), 0) as avg_profit_per_job,
+            COALESCE(AVG(fr.total_income), 0) as avg_revenue_per_job,
+            (COALESCE(SUM(fr.net_profit), 0) / NULLIF(SUM(fr.total_income), 0)) * 100 as profit_margin
+            FROM field_reports fr
+            WHERE " . implode(' AND ', $where) . "
+            GROUP BY $dateGroup
+            ORDER BY period ASC";
+        
+        $stmt = $this->pdo->prepare($query);
+        $stmt->execute($params);
+        $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // If no grouped data, get overall summary
+        if (empty($data)) {
+            $summaryQuery = "SELECT 
+                COUNT(*) as job_count,
+                COALESCE(SUM(fr.total_income), 0) as total_revenue,
+                COALESCE(SUM(fr.total_expenses), 0) as total_expenses,
+                COALESCE(SUM(fr.net_profit), 0) as net_profit,
+                COALESCE(SUM(fr.total_wages), 0) as total_wages,
+                COALESCE(SUM(fr.materials_cost), 0) as materials_cost,
+                COALESCE(SUM(fr.materials_income), 0) as materials_income,
+                COALESCE(SUM(fr.total_depth), 0) as total_depth,
+                COALESCE(AVG(fr.total_depth), 0) as avg_depth,
+                COALESCE(SUM(fr.total_duration), 0) as total_duration,
+                COALESCE(AVG(fr.total_duration), 0) as avg_duration,
+                COALESCE(SUM(fr.total_rpm), 0) as total_rpm,
+                COALESCE(AVG(fr.net_profit), 0) as avg_profit_per_job,
+                COALESCE(AVG(fr.total_income), 0) as avg_revenue_per_job,
+                (COALESCE(SUM(fr.net_profit), 0) / NULLIF(SUM(fr.total_income), 0)) * 100 as profit_margin
+                FROM field_reports fr
+                WHERE " . implode(' AND ', $where);
+            
+            $summaryStmt = $this->pdo->prepare($summaryQuery);
+            $summaryStmt->execute($params);
+            $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($summary) {
+                $summary['period'] = $dateFrom . ' to ' . $dateTo;
+                $data = [$summary];
+            }
+        }
+        
+        $headers = [
+            'period', 'job_count', 'total_revenue', 'total_expenses', 'net_profit',
+            'total_wages', 'materials_cost', 'materials_income', 'total_depth',
+            'avg_depth', 'total_duration', 'avg_duration', 'total_rpm',
+            'avg_profit_per_job', 'avg_revenue_per_job', 'profit_margin'
+        ];
+        
+        $this->output($data, $headers, 'analytics', $format);
+    }
+    
+    /**
+     * Format date group for SQL
+     */
+    private function formatDateGroup($groupBy, $dateField) {
+        switch($groupBy) {
+            case 'day':
+                return "DATE_FORMAT($dateField, '%Y-%m-%d')";
+            case 'week':
+                return "DATE_FORMAT($dateField, '%Y-%u')";
+            case 'month':
+                return "DATE_FORMAT($dateField, '%Y-%m')";
+            case 'quarter':
+                return "CONCAT(YEAR($dateField), '-Q', QUARTER($dateField))";
+            case 'year':
+                return "YEAR($dateField)";
+            default:
+                return "DATE_FORMAT($dateField, '%Y-%m')";
+        }
+    }
+    
+    /**
      * Output data in requested format
      */
     private function output($data, $headers, $module, $format) {
@@ -352,8 +476,12 @@ class ExportManager {
                 foreach ($headers as $key) {
                     $value = $row[$key] ?? '';
                     // Format currency values
-                    if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked'])) {
+                    if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked', 'total_revenue', 'materials_cost', 'materials_income', 'avg_profit_per_job', 'avg_revenue_per_job'])) {
                         $value = is_numeric($value) ? number_format((float)$value, 2) : $value;
+                    }
+                    // Format percentage values
+                    if (in_array($key, ['profit_margin']) && is_numeric($value)) {
+                        $value = number_format((float)$value, 2) . '%';
                     }
                     $csvRow[] = $value;
                 }
@@ -390,8 +518,12 @@ class ExportManager {
                 foreach ($headers as $key) {
                     $value = $row[$key] ?? '';
                     // Format currency values
-                    if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked'])) {
+                    if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked', 'total_revenue', 'materials_cost', 'materials_income', 'avg_profit_per_job', 'avg_revenue_per_job'])) {
                         $value = is_numeric($value) ? number_format((float)$value, 2) : $value;
+                    }
+                    // Format percentage values
+                    if (in_array($key, ['profit_margin']) && is_numeric($value)) {
+                        $value = number_format((float)$value, 2) . '%';
                     }
                     // Escape formulas that start with =, +, -, @
                     if (is_string($value) && in_array(substr($value, 0, 1), ['=', '+', '-', '@'])) {
@@ -531,8 +663,10 @@ class ExportManager {
                         <td class="<?php echo in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked']) ? 'currency' : ''; ?>">
                             <?php 
                             $value = $row[$key] ?? '';
-                            if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked']) && is_numeric($value)) {
+                            if (in_array($key, ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'rate', 'unit_cost', 'total_value', 'days_balance', 'total_money_banked', 'total_revenue', 'materials_cost', 'materials_income', 'avg_profit_per_job', 'avg_revenue_per_job']) && is_numeric($value)) {
                                 echo 'GHS ' . number_format((float)$value, 2);
+                            } elseif (in_array($key, ['profit_margin']) && is_numeric($value)) {
+                                echo number_format((float)$value, 2) . '%';
                             } else {
                                 echo htmlspecialchars($value);
                             }
@@ -546,7 +680,7 @@ class ExportManager {
     
     <?php 
     // Calculate summary for financial data
-    $financialFields = ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount'];
+    $financialFields = ['total_income', 'total_expenses', 'net_profit', 'total_wages', 'total_amount', 'total_revenue', 'materials_cost', 'materials_income'];
     $hasFinancial = false;
     $totals = [];
     foreach ($financialFields as $field) {

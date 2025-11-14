@@ -3,6 +3,7 @@
  * CMS Admin Panel
  */
 require_once '../includes/header.php';
+require_once '../includes/recruitment-utils.php';
 
 if (!isset($_SESSION['user_id']) || !isAdmin($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -10,6 +11,14 @@ if (!isset($_SESSION['user_id']) || !isAdmin($_SESSION['user_id'])) {
 }
 
 $pdo = getDBConnection();
+
+$recruitmentTablesReady = false;
+try {
+    $recruitmentTablesReady = recruitmentEnsureInitialized($pdo);
+} catch (Throwable $e) {
+    error_log('Recruitment initialization failed in CMS admin: ' . $e->getMessage());
+    $recruitmentTablesReady = false;
+}
 
 // Ensure tables exist
 try { $pdo->query("SELECT 1 FROM cms_pages LIMIT 1"); }
@@ -63,6 +72,7 @@ $tab = $_GET['tab'] ?? 'pages';
                 <a href="?tab=menu" class="<?php echo $tab === 'menu' ? 'active' : ''; ?>">🔗 Menu</a>
                 <a href="?tab=quotes" class="<?php echo $tab === 'quotes' ? 'active' : ''; ?>">📋 Quote Requests</a>
                 <a href="?tab=orders" class="<?php echo $tab === 'orders' ? 'active' : ''; ?>">🛒 Orders</a>
+                <a href="?tab=vacancies" class="<?php echo in_array($tab, ['vacancies', 'vacancy-edit']) ? 'active' : ''; ?>">💼 Vacancies</a>
                 <a href="?tab=settings" class="<?php echo $tab === 'settings' ? 'active' : ''; ?>">⚙️ Settings</a>
             </div>
 
@@ -75,6 +85,7 @@ $tab = $_GET['tab'] ?? 'pages';
                         $postsCount = $pdo->query("SELECT COUNT(*) FROM cms_posts WHERE status='published'")->fetchColumn();
                         $quotesCount = $pdo->query("SELECT COUNT(*) FROM cms_quote_requests WHERE status='new'")->fetchColumn();
                         $ordersCount = $pdo->query("SELECT COUNT(*) FROM cms_orders WHERE status='pending'")->fetchColumn();
+                        $vacancyCount = $recruitmentTablesReady ? (int)$pdo->query("SELECT COUNT(*) FROM recruitment_vacancies WHERE status='published'")->fetchColumn() : 0;
                         ?>
                         <div class="stats-grid">
                             <div class="stat-card">
@@ -93,9 +104,98 @@ $tab = $_GET['tab'] ?? 'pages';
                                 <h3><?php echo $ordersCount; ?></h3>
                                 <p>Pending Orders</p>
                             </div>
+                            <div class="stat-card">
+                                <h3><?php echo $vacancyCount; ?></h3>
+                                <p>Published Vacancies</p>
+                            </div>
                         </div>
                         <p><a href="?tab=quotes" class="btn btn-primary">View Quote Requests →</a></p>
                         <?php break;
+                    case 'vacancy-edit':
+                        if (!$recruitmentTablesReady) {
+                            echo '<div class="alert alert-warning">Recruitment tables are not available. Please run <code>database/recruitment_module_migration.sql</code> via Database Migrations.</div>';
+                        } else {
+                            include __DIR__ . '/recruitment.php';
+                        }
+                        break;
+                    case 'vacancies':
+                        ?>
+                        <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+                            <h2 style="margin:0;">Vacancy Management</h2>
+                            <a href="recruitment.php#vacancies" class="btn btn-primary" target="_blank">+ New Vacancy</a>
+                            <a href="recruitment.php" class="btn" target="_blank">Open Recruitment Workspace →</a>
+                        </div>
+                        <?php
+                        if (!$recruitmentTablesReady) {
+                            ?>
+                            <div class="alert alert-warning">
+                                Recruitment tables are not available yet. Please run <code>database/recruitment_module_migration.sql</code> from <strong>Database Migrations</strong> (or ask an administrator) to enable vacancy management.
+                            </div>
+                            <?php
+                        } else {
+                            $vacancyStmt = $pdo->query("
+                                SELECT 
+                                    v.*,
+                                    COALESCE(COUNT(a.id), 0) AS total_applications,
+                                    COALESCE(SUM(CASE WHEN a.current_status IN ('hired','onboarding','employed') THEN 1 ELSE 0 END), 0) AS hires
+                                FROM recruitment_vacancies v
+                                LEFT JOIN recruitment_applications a ON a.vacancy_id = v.id
+                                GROUP BY v.id
+                                ORDER BY CASE WHEN v.status='published' THEN 0 ELSE 1 END, v.created_at DESC
+                            ");
+                            $vacancies = $vacancyStmt->fetchAll(PDO::FETCH_ASSOC);
+                            
+                            if (empty($vacancies)) {
+                                ?>
+                                <div class="admin-empty-state">
+                                    <div class="admin-empty-state-icon">💼</div>
+                                    <h3>No vacancies yet</h3>
+                                    <p>Click “+ New Vacancy” to publish your first role.</p>
+                                </div>
+                                <?php
+                            } else {
+                                ?>
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Title</th>
+                                            <th>Code</th>
+                                            <th>Status</th>
+                                            <th>Applications</th>
+                                            <th>Opening</th>
+                                            <th>Closing</th>
+                                            <th>Updated</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($vacancies as $vacancy): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($vacancy['title']); ?></td>
+                                                <td><?php echo htmlspecialchars($vacancy['vacancy_code']); ?></td>
+                                                <td>
+                                                    <span class="badge" style="text-transform: capitalize;"><?php echo htmlspecialchars($vacancy['status']); ?></span>
+                                                </td>
+                                                <td>
+                                                    <strong><?php echo (int)$vacancy['total_applications']; ?></strong>
+                                                    <small style="color: var(--secondary); display:block;">
+                                                        <?php echo (int)$vacancy['hires']; ?> hired
+                                                    </small>
+                                                </td>
+                                                <td><?php echo $vacancy['opening_date'] ? date('Y-m-d', strtotime($vacancy['opening_date'])) : '—'; ?></td>
+                                                <td><?php echo $vacancy['closing_date'] ? date('Y-m-d', strtotime($vacancy['closing_date'])) : '—'; ?></td>
+                                                <td><?php echo date('Y-m-d', strtotime($vacancy['updated_at'])); ?></td>
+                                                <td>
+                                                    <a href="recruitment.php?vacancy=<?php echo urlencode($vacancy['vacancy_code']); ?>" target="_blank">Manage</a>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                                <?php
+                            }
+                        }
+                        break;
                     case 'pages':
                         $pages = $pdo->query("SELECT * FROM cms_pages ORDER BY created_at DESC")->fetchAll();
                         ?>

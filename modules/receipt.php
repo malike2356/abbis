@@ -7,6 +7,7 @@ require_once '../config/app.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
+require_once '../includes/pos/PosRepository.php';
 
 $auth->requireAuth();
 
@@ -29,6 +30,17 @@ $report = $stmt->fetch();
 
 if (!$report) {
     die('Report not found');
+}
+
+$materialsStoreName = null;
+if (!empty($report['materials_store_id'])) {
+    try {
+        $posRepo = new PosRepository($pdo);
+        $store = $posRepo->fetchStoreById((int) $report['materials_store_id']);
+        $materialsStoreName = $store['store_name'] ?? null;
+    } catch (Throwable $e) {
+        $materialsStoreName = null;
+    }
 }
 
 // Get company config
@@ -57,7 +69,7 @@ $receiptNumber = 'RCP-' . date('Ymd-His') . '-' . $uniqueId . '-' . str_pad($rep
 
 // Generate QR code
 require_once '../includes/qr-code-generator.php';
-$receiptUrl = APP_URL . '/modules/receipt.php?report_id=' . $reportId;
+$receiptUrl = app_url('modules/receipt.php?report_id=' . $reportId);
 $qrCodePath = QRCodeGenerator::generate($receiptUrl, 'receipt', 150);
 
 ?>
@@ -389,10 +401,10 @@ $qrCodePath = QRCodeGenerator::generate($receiptUrl, 'receipt', 150);
         }
         $totalClientPayment += $catalogItemsTotal;
         
-        // Materials cost (if client purchased materials from company)
+        // Materials cost (if client purchased materials from company/store)
         $materialsCost = 0;
         $showMaterialsCost = false;
-        if (($report['materials_provided_by'] ?? '') === 'company') {
+        if (in_array(($report['materials_provided_by'] ?? ''), ['company', 'store'], true)) {
             $materialsCost = floatval($report['materials_cost'] ?? 0);
             $showMaterialsCost = $materialsCost > 0;
         }
@@ -467,7 +479,17 @@ $qrCodePath = QRCodeGenerator::generate($receiptUrl, 'receipt', 150);
             
             <?php if ($showMaterialsCost): ?>
             <div class="total-row">
-                <span>Materials Cost (Purchased from Company):</span>
+                <span>
+                    Materials Cost (
+                    <?php
+                        if (($report['materials_provided_by'] ?? '') === 'store' && $materialsStoreName) {
+                            echo 'POS Store: ' . e($materialsStoreName);
+                        } else {
+                            echo 'Purchased from Company';
+                        }
+                    ?>
+                    ):
+                </span>
                 <span style="color: #0ea5e9; font-weight: 600;"><?php echo formatCurrency($materialsCost); ?></span>
             </div>
             <?php endif; ?>

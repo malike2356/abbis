@@ -91,6 +91,9 @@ require_once '../includes/header.php';
                     <button type="button" class="tab" onclick="switchConfigTab('rod-lengths')">
                         <span>📏</span> Rod Lengths
                     </button>
+                    <button type="button" class="tab" onclick="switchConfigTab('receipts')">
+                        <span>🧾</span> Receipt Templates
+                    </button>
                 </div>
 
                 <!-- Company Info Tab -->
@@ -102,7 +105,7 @@ require_once '../includes/header.php';
                     <!-- Simple Logo Upload Form -->
                     <div class="dashboard-card" style="margin-bottom: 20px;">
                         <h2>Company Logo</h2>
-                        <form method="POST" action="../api/upload-logo.php" enctype="multipart/form-data" id="logoUploadForm" class="ajax-form">
+                        <form method="POST" action="<?php echo api_url('upload-logo.php'); ?>" enctype="multipart/form-data" id="logoUploadForm" class="ajax-form">
                             <?php echo CSRF::getTokenField(); ?>
                             <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
                                 <div style="flex: 1; min-width: 250px;">
@@ -155,7 +158,7 @@ require_once '../includes/header.php';
                     </div>
                     
                     <!-- Company Info Form -->
-                    <form method="POST" action="../api/update-company-info.php" id="companyInfoForm">
+                    <form method="POST" action="<?php echo api_url('update-company-info.php'); ?>" id="companyInfoForm">
                         <?php echo CSRF::getTokenField(); ?>
                         
                         <div class="dashboard-card">
@@ -186,13 +189,70 @@ require_once '../includes/header.php';
                                     <input type="email" id="config_company_email" name="config_company_email" class="form-control" 
                                            value="<?php echo e($config['company_email'] ?? 'info@abbis.africa'); ?>">
                                 </div>
+                                <div class="form-group">
+                                    <label for="config_currency" class="form-label">Currency</label>
+                                    <input type="text" id="config_currency" name="config_currency" class="form-control" 
+                                           value="<?php echo e($config['currency'] ?? 'GHS'); ?>" 
+                                           placeholder="GHS, USD, EUR, etc." 
+                                           maxlength="10">
+                                    <small class="form-text">Currency code/symbol used throughout the system for all money displays (e.g., GHS, USD, EUR, ₵)</small>
+                                </div>
                             </div>
                             <div class="form-actions">
                                 <button type="submit" class="btn btn-primary">Save Company Info</button>
-                            </div>
-                        </div>
+                </div>
+                
+                <!-- Receipt Templates Tab -->
+                <div class="tab-pane" id="receipts-tab" style="display: none;">
+                    <div class="dashboard-card">
+                        <h2>Receipt Template Configuration</h2>
+                        <p style="margin-bottom: 20px; color: var(--secondary);">Customize receipt appearance and content for both printed and email receipts.</p>
                         
-                        <script>
+                        <form method="POST" action="<?php echo api_url('update-company-info.php'); ?>" id="receiptTemplateForm">
+                            <?php echo CSRF::getTokenField(); ?>
+                            
+                            <div class="form-grid">
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label for="receipt_email_subject" class="form-label">Email Receipt Subject Template</label>
+                                    <input type="text" id="receipt_email_subject" name="receipt_email_subject" class="form-control" 
+                                           value="<?php echo e($config['receipt_email_subject'] ?? 'Receipt for Sale {{sale_number}}'); ?>"
+                                           placeholder="Receipt for Sale {{sale_number}}">
+                                    <small class="form-text">Use {{sale_number}} and {{company_name}} as placeholders</small>
+                                </div>
+                                
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label for="receipt_footer" class="form-label">Receipt Footer Text</label>
+                                    <textarea id="receipt_footer" name="receipt_footer" class="form-control" rows="3" 
+                                              placeholder="Thank you for your business!"><?php echo e($config['receipt_footer'] ?? ''); ?></textarea>
+                                    <small class="form-text">Text displayed at the bottom of receipts (printed and email)</small>
+                                </div>
+                                
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label for="receipt_terms" class="form-label">Terms and Conditions</label>
+                                    <textarea id="receipt_terms" name="receipt_terms" class="form-control" rows="4" 
+                                              placeholder="Terms and conditions..."><?php echo e($config['receipt_terms'] ?? ''); ?></textarea>
+                                    <small class="form-text">Terms and conditions displayed on receipts</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" id="receipt_show_qr" name="receipt_show_qr" value="1" 
+                                               <?php echo (!empty($config['receipt_show_qr']) && $config['receipt_show_qr'] == '1') ? 'checked' : ''; ?>>
+                                        Show QR Code on Receipts
+                                    </label>
+                                    <small class="form-text">Display QR code with sale information on receipts</small>
+                                </div>
+                            </div>
+                            
+                            <div class="form-actions" style="margin-top: 20px;">
+                                <button type="submit" class="btn btn-primary">Save Receipt Settings</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <script>
                         function previewLogo(input) {
                             if (input.files && input.files[0]) {
                                 const file = input.files[0];
@@ -233,7 +293,10 @@ require_once '../includes/header.php';
                     <div class="dashboard-card">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h2>Rigs Management</h2>
-                            <button type="button" class="btn btn-primary" onclick="showRigModal()">Add New Rig</button>
+                            <div style="display: flex; gap: 10px;">
+                                <a href="rig-tracking.php" class="btn btn-success">📍 Track Rigs</a>
+                                <button type="button" class="btn btn-primary" onclick="showRigModal()">Add New Rig</button>
+                            </div>
                         </div>
                         <div class="table-responsive">
                             <table class="table">
@@ -294,6 +357,7 @@ require_once '../includes/header.php';
                                         </td>
                                         <td>
                                             <button type="button" class="btn btn-sm btn-primary" onclick="editRig(<?php echo htmlspecialchars(json_encode($rig)); ?>)">Edit</button>
+                                            <a href="rig-tracking.php?rig_id=<?php echo $rig['id']; ?>" class="btn btn-sm btn-success" title="Track Location">📍 Track</a>
                                             <button type="button" class="btn btn-sm btn-danger" onclick="deleteRig(<?php echo $rig['id']; ?>)">Delete</button>
                                         </td>
                                     </tr>
@@ -406,7 +470,7 @@ require_once '../includes/header.php';
                         <h2 id="rigModalTitle">Add New Rig</h2>
                         <button type="button" class="modal-close" onclick="closeRigModal()">&times;</button>
                     </div>
-                    <form method="POST" action="../api/config-crud.php" class="ajax-form" id="rigForm">
+                    <form method="POST" action="<?php echo api_url('config-crud.php'); ?>" class="ajax-form" id="rigForm">
                         <?php echo CSRF::getTokenField(); ?>
                         <input type="hidden" name="action" id="rigAction" value="add_rig">
                         <input type="hidden" name="id" id="rigId" value="">
@@ -500,7 +564,7 @@ require_once '../includes/header.php';
                         <h2 id="materialModalTitle">Update Material</h2>
                         <button type="button" class="modal-close" onclick="closeMaterialModal()">&times;</button>
                     </div>
-                    <form method="POST" action="../api/config-crud.php" class="ajax-form" id="materialForm">
+                    <form method="POST" action="<?php echo api_url('config-crud.php'); ?>" class="ajax-form" id="materialForm">
                         <?php echo CSRF::getTokenField(); ?>
                         <input type="hidden" name="action" value="update_material">
                         <input type="hidden" name="material_type" id="material_type" value="">
@@ -530,7 +594,7 @@ require_once '../includes/header.php';
                         <h2 id="rodLengthModalTitle">Add New Rod Length</h2>
                         <button type="button" class="modal-close" onclick="closeRodLengthModal()">&times;</button>
                     </div>
-                    <form method="POST" action="../api/config-crud.php" class="ajax-form" id="rodLengthForm">
+                    <form method="POST" action="<?php echo api_url('config-crud.php'); ?>" class="ajax-form" id="rodLengthForm">
                         <?php echo CSRF::getTokenField(); ?>
                         <input type="hidden" name="action" id="rodLengthAction" value="add_rod_length">
                         <input type="hidden" name="old_length" id="rodLengthOld" value="">

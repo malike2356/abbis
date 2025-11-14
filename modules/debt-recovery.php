@@ -12,6 +12,7 @@ require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('finance.access');
 
 $pdo = getDBConnection();
 $action = $_GET['action'] ?? 'list';

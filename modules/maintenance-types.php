@@ -2,11 +2,22 @@
 /**
  * Maintenance Types Management (lightweight)
  */
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
 
 $pdo = getDBConnection();
 
 // Handle add/delete simple POST
 if (!empty($_POST['action_type'])) {
+    // CSRF protection
+    if (!CSRF::validateToken($_POST['csrf_token'] ?? '')) {
+        die('Invalid security token');
+    }
     try {
         if ($_POST['action_type'] === 'add') {
             $stmt = $pdo->prepare("INSERT INTO maintenance_types (type_name, description) VALUES (?, ?)");
@@ -55,6 +66,7 @@ try {
 <?php if (empty($tableMissing)): ?>
 <div id="newType" class="dashboard-card" style="display:none;">
     <form method="post" style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <?php echo CSRF::getTokenField(); ?>
         <input type="hidden" name="action_type" value="add">
         <div>
             <label class="form-label">Type Name</label>
@@ -94,6 +106,7 @@ try {
                             <td style="color: var(--secondary); font-size:12px; "><?php echo !empty($t['created_at']) ? formatDate($t['created_at']) : '—'; ?></td>
                             <td>
                                 <form method="post" style="display:inline;" onsubmit="return confirm('Delete this type?');">
+                                    <?php echo CSRF::getTokenField(); ?>
                                     <input type="hidden" name="action_type" value="delete">
                                     <input type="hidden" name="id" value="<?php echo $t['id']; ?>">
                                     <button type="submit" class="btn btn-sm btn-outline">Delete</button>

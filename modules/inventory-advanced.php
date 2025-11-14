@@ -11,8 +11,9 @@ if (!isset($auth)) {
     require_once '../config/security.php';
     require_once '../includes/auth.php';
     require_once '../includes/helpers.php';
-    $auth->requireAuth();
 }
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
 
 if (!isset($pdo)) {
     $pdo = getDBConnection();

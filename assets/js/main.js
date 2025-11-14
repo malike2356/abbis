@@ -19,7 +19,7 @@ class ABBISApp {
             localStorage.setItem('abbis_theme_mode', legacy === 'dark' ? 'dark' : 'light');
         }
 
-        const mode = localStorage.getItem('abbis_theme_mode') || 'system';
+        const mode = localStorage.getItem('abbis_theme_mode') || 'light';
         const effective = this.resolveThemeFromMode(mode);
         this.applyTheme(effective);
         this.updateThemeIcon(mode, effective);
@@ -97,7 +97,23 @@ class ABBISApp {
 
     async saveThemeToSession(theme) {
         try {
-            await fetch('api/save-theme.php', {
+            const body = document.body;
+            let base = '';
+            if (body && body.dataset) {
+                base = body.dataset.appRoot || '';
+            }
+            if (!base) {
+                const cmsHeader = document.querySelector('.cms-global-header');
+                if (cmsHeader) {
+                    base = cmsHeader.getAttribute('data-base') || '';
+                }
+            }
+            const normalizedBase = base
+                ? (base.endsWith('/') ? base : base + '/')
+                : '';
+            const apiUrl = normalizedBase + 'api/save-theme.php';
+
+            await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -136,23 +152,52 @@ class ABBISApp {
     initializeMobileMenu() {
         const menuToggle = document.getElementById('mobileMenuToggle');
         const mainNav = document.getElementById('mainNav');
+        const backdrop = document.getElementById('mobileNavBackdrop');
+        const mobileBreakpoint = 1024;
         
         if (menuToggle && mainNav) {
+            const toggleAriaState = (expanded) => {
+                menuToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                mainNav.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+                if (expanded) {
+                    mainNav.setAttribute('tabindex', '-1');
+                } else {
+                    mainNav.removeAttribute('tabindex');
+                }
+            };
+
+            const showBackdrop = () => {
+                if (!backdrop) return;
+                backdrop.style.display = 'block';
+                requestAnimationFrame(() => backdrop.classList.add('active'));
+            };
+
+            const hideBackdrop = () => {
+                if (!backdrop) return;
+                backdrop.classList.remove('active');
+                setTimeout(() => {
+                    if (!mainNav.classList.contains('active')) {
+                        backdrop.style.display = 'none';
+                    }
+                }, 250);
+            };
+
+            // Set initial accessibility state based on viewport
+            toggleAriaState(window.innerWidth > mobileBreakpoint);
+
             // Function to close menu
             const closeMenu = () => {
                 mainNav.classList.remove('active');
                 menuToggle.classList.remove('active');
-                const icon = menuToggle.querySelector('.hamburger-icon');
-                if (icon) {
-                    icon.textContent = '☰';
-                }
                 document.body.style.overflow = '';
+                toggleAriaState(false);
+                hideBackdrop();
                 // Hide after transition
                 setTimeout(() => {
                     if (!mainNav.classList.contains('active')) {
                         mainNav.style.display = '';
                     }
-                }, 400);
+                }, 300);
             };
             
             // Function to open menu
@@ -163,11 +208,13 @@ class ABBISApp {
                 setTimeout(() => {
                     mainNav.classList.add('active');
                     menuToggle.classList.add('active');
-                    const icon = menuToggle.querySelector('.hamburger-icon');
-                    if (icon) {
-                        icon.textContent = '✕';
-                    }
                     document.body.style.overflow = 'hidden';
+                    toggleAriaState(true);
+                    showBackdrop();
+                    const firstFocusable = mainNav.querySelector('a, button');
+                    if (firstFocusable) {
+                        firstFocusable.focus({ preventScroll: true });
+                    }
                     // Force repaint
                     void mainNav.offsetHeight;
                 }, 10);
@@ -187,19 +234,23 @@ class ABBISApp {
             
             // Close menu when clicking outside
             document.addEventListener('click', (e) => {
-                if (window.innerWidth <= 768 && 
+                if (window.innerWidth <= mobileBreakpoint && 
                     mainNav.classList.contains('active') && 
                     !mainNav.contains(e.target) && 
                     !menuToggle.contains(e.target)) {
                     closeMenu();
                 }
             });
+
+            if (backdrop) {
+                backdrop.addEventListener('click', closeMenu);
+            }
             
             // Close menu when clicking a nav item (on mobile)
             mainNav.querySelectorAll('.nav-item').forEach(item => {
                 item.addEventListener('click', () => {
-                    if (window.innerWidth <= 768) {
-                        setTimeout(closeMenu, 200);
+                    if (window.innerWidth <= mobileBreakpoint) {
+                        setTimeout(closeMenu, 150);
                     }
                 });
             });
@@ -209,9 +260,14 @@ class ABBISApp {
             window.addEventListener('resize', () => {
                 clearTimeout(resizeTimer);
                 resizeTimer = setTimeout(() => {
-                    if (window.innerWidth > 768) {
+                    if (window.innerWidth > mobileBreakpoint) {
                         closeMenu();
                         document.body.style.overflow = '';
+                        hideBackdrop();
+                        toggleAriaState(true);
+                        mainNav.style.display = '';
+                    } else {
+                        toggleAriaState(false);
                     }
                 }, 250);
             });

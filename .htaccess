@@ -57,21 +57,35 @@ AddDefaultCharset UTF-8
     RewriteEngine On
     RewriteBase /abbis3.2/
     
-           # Route CMS homepage
-           RewriteCond %{REQUEST_FILENAME} !-f
-           RewriteCond %{REQUEST_FILENAME} !-d
-           RewriteRule ^cms/?$ cms/public/index.php [L,QSA]
-           
-           # Route CMS URLs to public PHP files (only if file doesn't exist)
-           RewriteCond %{REQUEST_FILENAME} !-f
-           RewriteCond %{REQUEST_FILENAME} !-d
-           RewriteRule ^cms/shop/?$ cms/public/shop.php [L,QSA]
-           RewriteRule ^cms/product/([0-9]+)/?$ cms/public/product.php?id=$1 [L,QSA]
-           RewriteRule ^cms/quote/?$ cms/public/quote.php [L,QSA]
-           RewriteRule ^cms/cart/?$ cms/public/cart.php [L,QSA]
-           RewriteRule ^cms/checkout/?$ cms/public/checkout.php [L,QSA]
-           RewriteRule ^cms/blog/?$ cms/public/blog.php [L,QSA]
-           RewriteRule ^cms/post/([^/]+)/?$ cms/public/post.php?slug=$1 [L,QSA]
+    # Handle requests with /abbis3.2/ prefix
+    # Route CMS homepage
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^cms/?$ cms/public/index.php [L,QSA]
+    
+    # Route CMS URLs to public PHP files (only if file doesn't exist)
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^cms/shop/?$ cms/public/shop.php [L,QSA]
+    RewriteRule ^cms/product/([0-9]+)/?$ cms/public/product.php?id=$1 [L,QSA]
+    RewriteRule ^cms/quote/?$ cms/public/quote.php [L,QSA]
+    RewriteRule ^cms/rig-request/?$ cms/public/rig-request.php [L,QSA]
+    RewriteRule ^cms/contact/?$ cms/public/contact.php [L,QSA]
+    RewriteRule ^cms/contact-us/?$ cms/public/contact.php [L,QSA]
+    RewriteRule ^cms/complaints/?$ cms/public/complaints.php [L,QSA]
+    RewriteRule ^cms/feedback/?$ cms/public/complaints.php [L,QSA]
+    
+    RewriteRule ^cms/cart/?$ cms/public/cart.php [L,QSA]
+    RewriteRule ^cms/checkout/?$ cms/public/checkout.php [L,QSA]
+    RewriteRule ^cms/blog/?$ cms/public/blog.php [L,QSA]
+    RewriteRule ^cms/post/([^/]+)/?$ cms/public/post.php?slug=$1 [L,QSA]
+    # Portfolio routes - must come before general page routing
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^cms/portfolio/?$ cms/public/portfolio.php [L,QSA]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^cms/portfolio/(.+)$ cms/public/portfolio.php?slug=$1 [L,QSA,B,NE]
            RewriteRule ^cms/admin/?$ cms/admin/index.php [L]
            RewriteRule ^cms/admin/(.*)$ cms/admin/$1 [L]
     # Route CMS pages - WordPress-like clean URLs
@@ -89,7 +103,7 @@ AddDefaultCharset UTF-8
     
     # Route CMS pages - must be last to catch all cms/* URLs
            # Exclude known routes first (including index.php)
-           RewriteCond %{REQUEST_URI} !^/abbis3.2/cms/(shop|product|quote|cart|checkout|blog|post|admin|payment|legal|order-confirmation|profile) [NC]
+           RewriteCond %{REQUEST_URI} !^/abbis3.2/cms/(shop|product|quote|rig-request|contact|contact-us|cart|checkout|blog|post|portfolio|admin|payment|legal|order-confirmation|profile) [NC]
            RewriteCond %{REQUEST_FILENAME} !-f
            RewriteCond %{REQUEST_FILENAME} !-d
            RewriteRule ^cms/([^/]+)/?$ cms/public/page.php?slug=$1 [L,QSA]

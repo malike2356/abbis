@@ -127,9 +127,16 @@ class ABBISFunctions {
         $totals['total_income'] += $materialsIncome;
         
         // EXPENSES (-) - Negatives
-        // Materials Purchased (only for direct contracts)
+        // Materials Purchased
+        // Note: For subcontract jobs, if materials_provided_by = 'client', materials cost is NOT included
         $materialsCost = floatval($data['materials_cost'] ?? 0);
-        $totals['total_expenses'] += $materialsCost;
+        $jobType = $data['job_type'] ?? 'direct';
+        $materialsProvidedBy = $data['materials_provided_by'] ?? 'client';
+        
+        // Rule: If contractor job AND materials provided by client → NOT in cost
+        if (!($jobType === 'subcontract' && $materialsProvidedBy === 'client')) {
+            $totals['total_expenses'] += $materialsCost;
+        }
         
         // Wages (calculated separately)
         $totalWages = floatval($data['total_wages'] ?? 0);
@@ -188,6 +195,7 @@ class ABBISFunctions {
         
         $stats = [];
         
+        try {
         // Today's totals
         $stmt = $this->pdo->prepare("
             SELECT 
@@ -277,14 +285,28 @@ class ABBISFunctions {
         $thisMonthJobs = (int)$stats['this_month']['total_reports_this_month'];
         $lastMonthJobs = (int)$lastMonth['total_reports_last_month'];
         
+        // Calculate profit growth safely (handle negative profits)
+        $profitGrowth = 0;
+        if ($lastMonthProfit != 0) {
+            $profitGrowth = (($thisMonthProfit - $lastMonthProfit) / abs($lastMonthProfit)) * 100;
+        } elseif ($thisMonthProfit > 0 && $lastMonthProfit == 0) {
+            // If we went from 0 to positive, that's 100% growth
+            $profitGrowth = 100;
+        } elseif ($thisMonthProfit < 0 && $lastMonthProfit == 0) {
+            // If we went from 0 to negative, that's -100% growth
+            $profitGrowth = -100;
+        }
+        
         $stats['growth'] = [
-            'revenue_growth_mom' => $lastMonthRevenue > 0 ? (($thisMonthRevenue - $lastMonthRevenue) / $lastMonthRevenue) * 100 : 0,
-            'profit_growth_mom' => $lastMonthProfit != 0 ? ($lastMonthProfit > 0 ? (($thisMonthProfit - $lastMonthProfit) / abs($lastMonthProfit)) * 100 : 0) : 0,
-            'jobs_growth_mom' => $lastMonthJobs > 0 ? (($thisMonthJobs - $lastMonthJobs) / $lastMonthJobs) * 100 : 0,
+            'revenue_growth_mom' => $lastMonthRevenue > 0 ? (($thisMonthRevenue - $lastMonthRevenue) / $lastMonthRevenue) * 100 : ($thisMonthRevenue > 0 ? 100 : 0),
+            'profit_growth_mom' => $profitGrowth,
+            'jobs_growth_mom' => $lastMonthJobs > 0 ? (($thisMonthJobs - $lastMonthJobs) / $lastMonthJobs) * 100 : ($thisMonthJobs > 0 ? 100 : 0),
             'this_month_revenue' => $thisMonthRevenue,
             'last_month_revenue' => $lastMonthRevenue,
             'this_month_profit' => $thisMonthProfit,
             'last_month_profit' => $lastMonthProfit,
+            'this_month_jobs' => $thisMonthJobs,
+            'last_month_jobs' => $lastMonthJobs,
         ];
         
         // This Year totals
@@ -299,22 +321,32 @@ class ABBISFunctions {
         $stmt->execute();
         $stats['this_year'] = $stmt->fetch();
         
-        // Loan statistics
-        $stmt = $this->pdo->prepare("
-            SELECT 
-                COUNT(*) as total_loans,
-                COALESCE(SUM(loan_amount), 0) as total_loan_amount,
-                COALESCE(SUM(outstanding_balance), 0) as total_outstanding
-            FROM loans 
-            WHERE status = 'active'
-        ");
-        $stmt->execute();
-        $stats['loans'] = $stmt->fetch();
+        // Loan statistics (with error handling if table doesn't exist)
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT 
+                    COUNT(*) as total_loans,
+                    COALESCE(SUM(loan_amount), 0) as total_loan_amount,
+                    COALESCE(SUM(outstanding_balance), 0) as total_outstanding
+                FROM loans 
+                WHERE status = 'active'
+            ");
+            $stmt->execute();
+            $stats['loans'] = $stmt->fetch();
+        } catch (PDOException $e) {
+            // Table might not exist
+            $stats['loans'] = ['total_loans' => 0, 'total_loan_amount' => 0, 'total_outstanding' => 0];
+        }
         
-        // Materials value and costs
-        $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(total_value), 0) as total_materials_value FROM materials_inventory");
-        $stmt->execute();
-        $stats['materials'] = $stmt->fetch();
+        // Materials value and costs (with error handling if table doesn't exist)
+        try {
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(total_value), 0) as total_materials_value FROM materials_inventory");
+            $stmt->execute();
+            $stats['materials'] = $stmt->fetch();
+        } catch (PDOException $e) {
+            // Table might not exist
+            $stats['materials'] = ['total_materials_value' => 0];
+        }
         
         // Rig fee debts (if table exists, otherwise use outstanding_rig_fee from field_reports)
         try {
@@ -401,9 +433,9 @@ class ABBISFunctions {
         $totalOperatingHours = (float)$stats['operational']['total_operating_hours'] / 60; // Convert minutes to hours
         
         $stats['operational']['rig_utilization_rate'] = $activeRigs > 0 && $expectedHoursPerRig > 0 
-            ? ($totalOperatingHours / ($activeRigs * $expectedHoursPerRig)) * 100 : 0;
-        $stats['operational']['jobs_per_day'] = $totalJobs > 0 
-            ? $totalJobs / max(1, (time() - strtotime("first day of this year")) / 86400) : 0;
+            ? min(100, ($totalOperatingHours / ($activeRigs * $expectedHoursPerRig)) * 100) : 0;
+        $daysSinceYearStart = max(1, (time() - strtotime("first day of this year")) / 86400);
+        $stats['operational']['jobs_per_day'] = $totalJobs > 0 ? ($totalJobs / $daysSinceYearStart) : 0;
         
         // Top performing clients (by revenue)
         $stmt = $this->pdo->prepare("
@@ -472,6 +504,32 @@ class ABBISFunctions {
         ");
         $stmt->execute();
         $stats['cash_flow'] = $stmt->fetch();
+        
+        } catch (PDOException $e) {
+            // Log error but return empty stats structure
+            error_log("Dashboard stats error: " . $e->getMessage());
+            // Return minimal structure to prevent dashboard errors
+            return [
+                'today' => ['total_reports_today' => 0, 'total_income_today' => 0, 'net_profit_today' => 0, 'money_banked_today' => 0],
+                'overall' => ['total_reports' => 0, 'total_income' => 0, 'total_expenses' => 0, 'total_profit' => 0, 'outstanding_rig_fees' => 0],
+                'financial_health' => ['profit_margin' => 0, 'gross_margin' => 0, 'expense_ratio' => 0, 'avg_profit_per_job' => 0, 'avg_revenue_per_job' => 0, 'avg_cost_per_job' => 0],
+                'this_month' => ['total_reports_this_month' => 0, 'total_income_this_month' => 0, 'total_profit_this_month' => 0],
+                'growth' => ['revenue_growth_mom' => 0, 'profit_growth_mom' => 0, 'jobs_growth_mom' => 0, 'this_month_revenue' => 0, 'last_month_revenue' => 0, 'this_month_profit' => 0, 'last_month_profit' => 0, 'this_month_jobs' => 0, 'last_month_jobs' => 0],
+                'this_year' => ['total_reports_this_year' => 0, 'total_income_this_year' => 0, 'total_profit_this_year' => 0],
+                'loans' => ['total_loans' => 0, 'total_outstanding' => 0],
+                'materials' => ['total_materials_value' => 0],
+                'balance_sheet' => ['total_assets' => 0, 'total_liabilities' => 0, 'net_worth' => 0, 'debt_to_asset_ratio' => 0, 'cash_reserves' => 0, 'materials_value' => 0],
+                'operational' => ['rig_utilization_rate' => 0, 'avg_job_duration_minutes' => 0, 'avg_depth_per_job' => 0, 'active_rigs' => 0, 'jobs_per_day' => 0],
+                'cash_flow' => ['cash_inflow' => 0, 'cash_outflow' => 0, 'net_cash_flow' => 0, 'deposits' => 0],
+                'top_clients' => [],
+                'top_rigs' => [],
+                'job_types' => []
+            ];
+        } catch (Exception $e) {
+            // Catch any other exceptions
+            error_log("Dashboard stats error: " . $e->getMessage());
+            return [];
+        }
         
         // Cache for 1 hour
         if ($useCache) {

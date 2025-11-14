@@ -1,4 +1,12 @@
 <?php
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
+
 /**
  * Asset Add/Edit Form (placeholder implementation)
  * Provides a theme-aware form to create or edit an asset.

@@ -50,7 +50,6 @@ $companyName = getCMSSiteName('Our Store');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Order Confirmation - <?php echo htmlspecialchars($companyName); ?></title>
-    <?php include __DIR__ . '/header.php'; ?>
     <style>
         .confirmation-container { max-width: 900px; margin: 0 auto; padding: 3rem 2rem; }
         .confirmation-header { text-align: center; margin-bottom: 3rem; }

@@ -81,11 +81,7 @@ $failCount = 0;
 $savedFiles = []; // Store all saved payslip files for zip creation
 
 // Get base URL
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_base_path();
 
 // Payslip save directory
 $payslipDir = __DIR__ . '/../uploads/payslips/';
@@ -142,10 +138,13 @@ foreach ($workerNames as $workerName) {
             error_log("Bulk payslip: No entries for {$workerName} in period {$dateFrom} to {$dateTo}, generating zero-amount payslip");
         }
         
-        // Generate payslip URL - use relative path
-        $payslipUrl = $baseUrl . '/modules/payslip.php?worker=' . urlencode($workerName) . 
-                     '&date_from=' . urlencode($dateFrom) . 
-                     '&date_to=' . urlencode($dateTo);
+        // Generate payslip URL - use URL helper
+        require_once __DIR__ . '/../includes/url-manager.php';
+        $payslipUrl = module_url('payslip.php', [
+            'worker' => $workerName,
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo
+        ]);
         
         // Save payslip HTML file (always if email is enabled, or if download_locally is enabled)
         $savedFile = null;
@@ -390,7 +389,7 @@ if ($downloadLocally && !empty($savedFiles)) {
             $zip->close();
             
             if (file_exists($zipFilepath)) {
-                $zipUrl = $baseUrl . '/uploads/payslips/' . $zipFilename;
+                $zipUrl = site_url('uploads/payslips/' . $zipFilename);
             }
         }
     } catch (Exception $e) {

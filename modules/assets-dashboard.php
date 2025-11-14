@@ -3,6 +3,14 @@
  * Assets Dashboard
  * Overview of assets and their status
  */
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
+
 $pdo = getDBConnection();
 
 // Get asset statistics

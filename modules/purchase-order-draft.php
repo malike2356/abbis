@@ -11,7 +11,7 @@ require_once '../includes/auth.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
-$auth->requireRole([ROLE_ADMIN, ROLE_MANAGER, ROLE_SUPERVISOR]);
+$auth->requirePermission('resources.access');
 
 $pdo = getDBConnection();
 

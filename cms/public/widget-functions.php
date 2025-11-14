@@ -30,7 +30,8 @@ function renderWidget($widget, $pdo) {
     $data = json_decode($widget['widget_data'] ?? '{}', true);
     $title = $widget['widget_title'];
     $type = $widget['widget_type'];
-    
+    $baseUrl = app_base_path();
+
     ob_start();
     ?>
     <div class="widget widget-<?php echo htmlspecialchars($type); ?>">
@@ -57,11 +58,6 @@ function renderWidget($widget, $pdo) {
                         if (!empty($posts)) {
                             echo '<ul>';
                             foreach ($posts as $post) {
-                                $baseUrl = '/abbis3.2';
-                                if (defined('APP_URL')) {
-                                    $parsed = parse_url(APP_URL);
-                                    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                                }
                                 echo '<li><a href="' . $baseUrl . '/cms/post/' . htmlspecialchars($post['slug']) . '">' . htmlspecialchars($post['title']) . '</a></li>';
                             }
                             echo '</ul>';
@@ -74,11 +70,6 @@ function renderWidget($widget, $pdo) {
                         $categories = $pdo->query("SELECT * FROM cms_categories ORDER BY name");
                         echo '<ul>';
                         while ($cat = $categories->fetch()) {
-                            $baseUrl = '/abbis3.2';
-                            if (defined('APP_URL')) {
-                                $parsed = parse_url(APP_URL);
-                                $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                            }
                             echo '<li><a href="' . $baseUrl . '/cms/category/' . htmlspecialchars($cat['slug']) . '">' . htmlspecialchars($cat['name']) . '</a></li>';
                         }
                         echo '</ul>';
@@ -86,22 +77,12 @@ function renderWidget($widget, $pdo) {
                     break;
                     
                 case 'search':
-                    $baseUrl = '/abbis3.2';
-                    if (defined('APP_URL')) {
-                        $parsed = parse_url(APP_URL);
-                        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                    }
                     echo '<form method="get" action="' . $baseUrl . '/cms/search"><input type="search" name="q" placeholder="Search..."><button type="submit">Search</button></form>';
                     break;
                     
                 case 'pages':
                     try {
                         $pages = $pdo->query("SELECT * FROM cms_pages WHERE status='published' ORDER BY title");
-                        $baseUrl = '/abbis3.2';
-                        if (defined('APP_URL')) {
-                            $parsed = parse_url(APP_URL);
-                            $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                        }
                         echo '<ul>';
                         while ($page = $pages->fetch()) {
                             echo '<li><a href="' . $baseUrl . '/cms/page/' . htmlspecialchars($page['slug']) . '">' . htmlspecialchars($page['title']) . '</a></li>';

@@ -1,49 +1,48 @@
 <?php
 /**
  * Email Notification System
- * Handles queuing and sending email notifications
+ * Bridges legacy notification helpers with the new Email service
  */
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/email.php';
 
 class EmailNotification {
     private $pdo;
+    private $emailService;
     
     public function __construct() {
         $this->pdo = getDBConnection();
+        $this->emailService = new Email();
     }
     
     /**
      * Queue an email notification
      */
     public function queue($toEmail, $subject, $body, $type = 'general') {
-        try {
-            // Ensure email_queue table exists
-            $this->ensureTableExists();
-            
-            $stmt = $this->pdo->prepare("
-                INSERT INTO email_queue (to_email, subject, body, type, status, created_at)
-                VALUES (?, ?, ?, ?, 'pending', NOW())
-            ");
-            
-            $stmt->execute([$toEmail, $subject, $body, $type]);
-            return $this->pdo->lastInsertId();
-        } catch (PDOException $e) {
-            error_log("Email queue error: " . $e->getMessage());
-            return false;
-        }
+        return $this->emailService->queue(
+            [$toEmail],
+            $subject,
+            $body,
+            ['type' => $type]
+        );
     }
     
     /**
      * Send a notification immediately (and queue if fails)
      */
     public function send($toEmail, $subject, $body, $type = 'general') {
-        // Try to send immediately
-        if ($this->sendEmail($toEmail, $subject, $body)) {
+        $result = $this->emailService->send(
+            [$toEmail],
+            $subject,
+            $body,
+            ['type' => $type]
+        );
+
+        if ($result) {
             return true;
         }
-        
-        // If sending fails, queue it
+
         return $this->queue($toEmail, $subject, $body, $type);
     }
     
@@ -52,10 +51,8 @@ class EmailNotification {
      */
     public function processQueue($limit = 10) {
         try {
-            $this->ensureTableExists();
-            
             $stmt = $this->pdo->prepare("
-                SELECT id, to_email, subject, body, type, attempts
+                SELECT id, to_email, subject, body, type, attempts, driver, cc, bcc, options_json
                 FROM email_queue
                 WHERE status = 'pending' AND attempts < 3
                 ORDER BY created_at ASC
@@ -68,14 +65,14 @@ class EmailNotification {
             $failed = 0;
             
             foreach ($emails as $email) {
-                if ($this->sendEmail($email['to_email'], $email['subject'], $email['body'])) {
+                if ($this->emailService->deliverQueuedPayload($email)) {
                     // Mark as sent
                     $updateStmt = $this->pdo->prepare("
                         UPDATE email_queue 
-                        SET status = 'sent', sent_at = NOW(), attempts = attempts + 1
+                        SET status = 'sent', sent_at = ?, attempts = attempts + 1
                         WHERE id = ?
                     ");
-                    $updateStmt->execute([$email['id']]);
+                    $updateStmt->execute([$this->currentTimestamp(), $email['id']]);
                     $sent++;
                 } else {
                     // Increment attempts
@@ -98,35 +95,6 @@ class EmailNotification {
     }
     
     /**
-     * Send email using PHP mail() function
-     * Can be enhanced to use SMTP, PHPMailer, etc.
-     */
-    private function sendEmail($toEmail, $subject, $body) {
-        // Get email configuration
-        $fromEmail = $this->getConfig('email_from', 'noreply@abbis.com');
-        $fromName = $this->getConfig('company_name', 'ABBIS');
-        
-        $headers = [
-            'From: ' . $fromName . ' <' . $fromEmail . '>',
-            'Reply-To: ' . $fromEmail,
-            'X-Mailer: PHP/' . phpversion(),
-            'MIME-Version: 1.0',
-            'Content-Type: text/html; charset=UTF-8'
-        ];
-        
-        $headersString = implode("\r\n", $headers);
-        
-        // Try to send email
-        try {
-            $result = @mail($toEmail, $subject, $body, $headersString);
-            return $result;
-        } catch (Exception $e) {
-            error_log("Email send error: " . $e->getMessage());
-            return false;
-        }
-    }
-    
-    /**
      * Get configuration value
      */
     private function getConfig($key, $default = '') {
@@ -141,29 +109,11 @@ class EmailNotification {
     }
     
     /**
-     * Ensure email_queue table exists
+     * Ensure email_queue table exists (legacy compatibility)
      */
     private function ensureTableExists() {
-        try {
-            $this->pdo->exec("
-                CREATE TABLE IF NOT EXISTS `email_queue` (
-                    `id` int(11) NOT NULL AUTO_INCREMENT,
-                    `to_email` varchar(255) NOT NULL,
-                    `subject` varchar(255) NOT NULL,
-                    `body` text NOT NULL,
-                    `type` varchar(50) DEFAULT 'general',
-                    `status` enum('pending','sent','failed') DEFAULT 'pending',
-                    `attempts` int(11) DEFAULT '0',
-                    `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-                    `sent_at` timestamp NULL DEFAULT NULL,
-                    PRIMARY KEY (`id`),
-                    KEY `status` (`status`),
-                    KEY `created_at` (`created_at`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ");
-        } catch (PDOException $e) {
-            // Table might already exist
-        }
+        // Email service ensures the queue schema; kept for backwards compatibility.
+        $this->emailService = $this->emailService ?: new Email();
     }
     
     /**
@@ -252,6 +202,11 @@ class EmailNotification {
         } catch (PDOException $e) {
             return '';
         }
+    }
+
+    private function currentTimestamp(): string
+    {
+        return date('Y-m-d H:i:s');
     }
 }
 

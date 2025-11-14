@@ -759,7 +759,7 @@ $worker = $workerStmt->fetch(PDO::FETCH_ASSOC);
     
     <div class="print-actions no-print">
         <button onclick="window.print()" class="btn-print">🖨️ Print Payslip</button>
-        <a href="../modules/payroll.php" class="btn-print" style="background: #64748b; margin-left: 12px;">← Back to Payroll</a>
+        <a href="<?php echo module_url('payroll.php'); ?>" class="btn-print" style="background: #64748b; margin-left: 12px;">← Back to Payroll</a>
     </div>
 </body>
 </html>

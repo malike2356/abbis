@@ -100,7 +100,7 @@ require_once '../includes/header.php';
             </div>
             <div class="card-footer">
                 <a href="legal-documents.php" class="btn btn-outline">← Back to Documents</a>
-                <a href="../cms/legal/<?php echo htmlspecialchars($document['slug']); ?>/print" target="_blank" class="btn btn-primary">Print Document</a>
+                <a href="<?php echo cms_url('legal/' . htmlspecialchars($document['slug']) . '/print'); ?>" target="_blank" class="btn btn-primary">Print Document</a>
             </div>
         </div>
     <?php else: ?>
@@ -110,7 +110,7 @@ require_once '../includes/header.php';
                     <div class="card">
                         <div class="card-body text-center" style="padding: 40px;">
                             <p style="color: #646970;">No legal documents available.</p>
-                            <p><a href="../cms/admin/legal-documents.php" class="btn btn-primary">Manage Documents in CMS</a></p>
+                            <p><a href="<?php echo cms_url('admin/legal-documents.php'); ?>" class="btn btn-primary">Manage Documents in CMS</a></p>
                         </div>
                     </div>
                 </div>
@@ -145,7 +145,7 @@ require_once '../includes/header.php';
                                 </div>
                                 <div class="card-footer">
                                     <a href="?action=view&id=<?php echo $doc['id']; ?>" class="btn btn-primary btn-sm">View Document</a>
-                                    <a href="../cms/legal/<?php echo htmlspecialchars($doc['slug']); ?>" target="_blank" class="btn btn-outline btn-sm">Open in CMS</a>
+                                    <a href="<?php echo cms_url('legal/' . htmlspecialchars($doc['slug'])); ?>" target="_blank" class="btn btn-outline btn-sm">Open in CMS</a>
                                 </div>
                             </div>
                         </div>

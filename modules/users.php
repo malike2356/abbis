@@ -13,6 +13,8 @@ $auth->requireAuth();
 $auth->requireRole(ROLE_ADMIN);
 
 $pdo = getDBConnection();
+$roleLabels = $auth->getAccessControl()->getRoleLabels();
+$defaultRole = ROLE_CLERK;
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -43,6 +45,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $passwordHash = password_hash($password, PASSWORD_DEFAULT);
                 $stmt = $pdo->prepare("INSERT INTO users (username, email, password_hash, role, full_name) VALUES (?, ?, ?, ?, ?)");
                 $stmt->execute([$username, $email, $passwordHash, $role, $fullName]);
+                
+                // Send welcome email if user is a client
+                if ($role === ROLE_CLIENT) {
+                    $userId = $pdo->lastInsertId();
+                    $clientId = null;
+                    
+                    // Try to find client by email
+                    $clientStmt = $pdo->prepare("SELECT id FROM clients WHERE email = ? LIMIT 1");
+                    $clientStmt->execute([$email]);
+                    $client = $clientStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($client) {
+                        $clientId = $client['id'];
+                        // Link user to client
+                        $linkStmt = $pdo->prepare("UPDATE users SET client_id = ? WHERE id = ?");
+                        $linkStmt->execute([$clientId, $userId]);
+                    }
+                    
+                    // Send welcome email
+                    try {
+                        require_once __DIR__ . '/../includes/ClientPortal/ClientPortalNotificationService.php';
+                        $notificationService = new ClientPortalNotificationService();
+                        $notificationService->sendWelcomeEmail($userId, $username, $email, $password, $clientId);
+                    } catch (Exception $e) {
+                        error_log('Failed to send client welcome email: ' . $e->getMessage());
+                        // Don't fail user creation if email fails
+                    }
+                }
+                
                 flash('success', 'User created successfully');
                 break;
                 
@@ -84,8 +114,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('users.php');
 }
 
-// Get all users
-$users = $pdo->query("SELECT id, username, email, role, full_name, is_active, created_at, last_login FROM users ORDER BY created_at DESC")->fetchAll();
+// Get all users with lockout status
+$users = [];
+$userList = $pdo->query("SELECT id, username, email, role, full_name, is_active, created_at, last_login FROM users ORDER BY created_at DESC")->fetchAll();
+
+foreach ($userList as $user) {
+    // Get lockout status for each user
+    $lockoutStatus = $auth->getLockoutStatus($user['username']);
+    $user['lockout_status'] = $lockoutStatus;
+    $users[] = $user;
+}
 
 require_once '../includes/header.php';
 ?>
@@ -110,6 +148,7 @@ require_once '../includes/header.php';
                                 <th>Email</th>
                                 <th>Role</th>
                                 <th>Status</th>
+                                <th>Account Status</th>
                                 <th>Last Login</th>
                                 <th>Actions</th>
                             </tr>
@@ -120,15 +159,41 @@ require_once '../includes/header.php';
                                 <td><?php echo e($user['username']); ?></td>
                                 <td><?php echo e($user['full_name']); ?></td>
                                 <td><?php echo e($user['email']); ?></td>
-                                <td><span class="badge"><?php echo e($user['role']); ?></span></td>
+                                <td><span class="badge"><?php echo e($roleLabels[$user['role']] ?? $user['role']); ?></span></td>
                                 <td>
                                     <span class="status-badge status-<?php echo $user['is_active'] ? 'active' : 'inactive'; ?>">
                                         <?php echo $user['is_active'] ? 'Active' : 'Inactive'; ?>
                                     </span>
                                 </td>
+                                <td>
+                                    <?php 
+                                    $lockoutStatus = $user['lockout_status'] ?? [];
+                                    if (!empty($lockoutStatus) && $lockoutStatus['is_locked']): 
+                                    ?>
+                                        <span class="status-badge status-inactive" style="background: #ef4444; color: white;">
+                                            🔒 Locked (<?php echo $lockoutStatus['attempts']; ?> attempts)
+                                        </span>
+                                        <?php if ($lockoutStatus['time_until_unlock']): ?>
+                                            <br><small style="font-size: 11px; color: #64748b;">
+                                                Unlocks in: <?php echo gmdate('H:i:s', $lockoutStatus['time_until_unlock']); ?>
+                                            </small>
+                                        <?php endif; ?>
+                                    <?php elseif (!empty($lockoutStatus) && $lockoutStatus['attempts'] > 0): ?>
+                                        <span class="status-badge" style="background: #f59e0b; color: white;">
+                                            ⚠️ <?php echo $lockoutStatus['attempts']; ?> failed attempts
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="status-badge status-active">✅ Unlocked</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?php echo $user['last_login'] ? date('Y-m-d H:i', strtotime($user['last_login'])) : 'Never'; ?></td>
                                 <td>
                                     <button type="button" class="btn btn-sm btn-primary" onclick="editUser(<?php echo htmlspecialchars(json_encode($user)); ?>)">Edit</button>
+                                    <?php if (!empty($lockoutStatus) && $lockoutStatus['is_locked']): ?>
+                                        <button type="button" class="btn btn-sm btn-warning" onclick="unlockUser('<?php echo e($user['username']); ?>')" title="Unlock Account">
+                                            🔓 Unlock
+                                        </button>
+                                    <?php endif; ?>
                                     <?php if ($user['id'] != $_SESSION['user_id']): ?>
                                     <button type="button" class="btn btn-sm btn-danger" onclick="deleteUser(<?php echo $user['id']; ?>)">Delete</button>
                                     <?php endif; ?>
@@ -170,10 +235,11 @@ require_once '../includes/header.php';
                         <div class="form-group">
                             <label for="role" class="form-label">Role *</label>
                             <select id="role" name="role" class="form-control" required>
-                                <option value="clerk">Clerk</option>
-                                <option value="supervisor">Supervisor</option>
-                                <option value="manager">Manager</option>
-                                <option value="admin">Admin</option>
+                                <?php foreach ($roleLabels as $roleValue => $label): ?>
+                                <option value="<?php echo e($roleValue); ?>" <?php echo $roleValue === $defaultRole ? 'selected' : ''; ?>>
+                                    <?php echo e($label); ?>
+                                </option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
                         
@@ -242,6 +308,34 @@ require_once '../includes/header.php';
                 
                 function closeUserModal() {
                     document.getElementById('userModal').style.display = 'none';
+                }
+                
+                function unlockUser(username) {
+                    if (!confirm(`Are you sure you want to unlock account for "${username}"?`)) {
+                        return;
+                    }
+                    
+                    const formData = new FormData();
+                    formData.append('username', username);
+                    formData.append('csrf_token', '<?php echo CSRF::getToken(); ?>');
+                    
+                    fetch('<?php echo app_url('api/unlock-account.php'); ?>', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Account unlocked successfully!');
+                            location.reload();
+                        } else {
+                            alert('Error: ' + (data.message || 'Failed to unlock account'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error unlocking account: ' + error.message);
+                    });
                 }
                 
                 // Close modal when clicking outside

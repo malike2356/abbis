@@ -93,8 +93,13 @@ class ABBISCalculations {
         // EXPENSES (-) - Negatives
         let totalExpenses = 0;
         
-        // Materials Purchased (usually for direct contracts)
-        totalExpenses += materialsCost;
+        // Materials Purchased
+        // Rule: If contractor job AND materials provided by client → NOT in cost
+        const jobType = data.job_type || 'direct';
+        const materialsProvidedBy = data.materials_provided_by || 'client';
+        if (!(jobType === 'subcontract' && materialsProvidedBy === 'client')) {
+            totalExpenses += materialsCost;
+        }
         
         // Wages - Salaries or wages paid to workers
         totalExpenses += wagesTotal;
@@ -161,9 +166,10 @@ class ABBISCalculations {
         return Math.round((num + Number.EPSILON) * 100) / 100;
     }
 
-    // Format currency
+    // Format currency - uses system currency from window.SYSTEM_CURRENCY or defaults to GHS
     static formatCurrency(amount) {
-        return 'GHS ' + this.roundToTwo(amount).toLocaleString('en-GH', {
+        const currency = window.SYSTEM_CURRENCY || 'GHS';
+        return currency + ' ' + this.roundToTwo(amount).toLocaleString('en-GH', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });

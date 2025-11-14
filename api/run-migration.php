@@ -18,12 +18,13 @@ if (php_sapi_name() !== 'cli') {
 
 header('Content-Type: text/plain');
 
-$pdo = getDBConnection();
-$migrationFile = __DIR__ . '/../database/migration-interconnect-data.sql';
+try {
+    $pdo = getDBConnection();
+    $migrationFile = __DIR__ . '/../database/migration-interconnect-data.sql';
 
-if (!file_exists($migrationFile)) {
-    die("Error: Migration file not found: $migrationFile\n");
-}
+    if (!file_exists($migrationFile)) {
+        throw new Exception("Migration file not found: $migrationFile");
+    }
 
 echo "===========================================\n";
 echo "Data Interconnection Migration\n";
@@ -136,5 +137,10 @@ try {
     echo "⚠ expense_entries.maintenance_record_id missing (may not exist if no expenses yet)\n";
 }
 
-echo "\nMigration verification complete!\n";
+    echo "\nMigration verification complete!\n";
+} catch (Exception $e) {
+    echo "\n✗ ERROR: " . $e->getMessage() . "\n";
+    error_log("run-migration.php error: " . $e->getMessage());
+    exit(1);
+}
 

@@ -1,93 +1,71 @@
-# ABBIS v3.2 - Quick Start Guide
+# Material Store System - Quick Start Guide
 
-## 🚀 Quick Setup for XAMPP/LAMPP
+## 🚀 3-Minute Quick Start
 
-### Option 1: Automated Setup (Recommended)
-
-```bash
-cd /opt/lampp/htdocs/abbis3.2
-chmod +x setup-xampp.sh
-./setup-xampp.sh
+### Step 1: Run Migration (One Time Only)
 ```
-
-Then open: **http://localhost:8080/abbis3.2/login.php**
-
-**Note:** If your XAMPP Apache is configured to use port 8080 (instead of 80), use `:8080` in the URL.
-
-### Start XAMPP Services First!
-
-**If you get "Connection Refused" error:**
-
-```bash
-# Start XAMPP services
-sudo /opt/lampp/lampp start
-
-# Or use the quick start script
-./start-xampp.sh
+http://localhost:8080/abbis3.2/modules/admin/run-material-store-migration.php
 ```
+Click **"Run Migration"** button ✅
 
-Then try accessing: **http://localhost:8080/abbis3.2/login.php** (or `http://localhost/abbis3.2/login.php` if Apache uses port 80)
-
-### Option 2: Manual Setup
-
-1. **Start XAMPP:**
-   ```bash
-   sudo /opt/lampp/lampp start
-   ```
-
-2. **Create database:**
-   ```bash
-   /opt/lampp/bin/mysql -u root -e "CREATE DATABASE abbis_3_2 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-   ```
-
-3. **Import schema:**
-   ```bash
-   /opt/lampp/bin/mysql -u root abbis_3_2 < database/schema.sql
-   ```
-
-4. **Access:** http://localhost/abbis3.2/login.php
-
-## 🔐 Default Login
-
-- **Username:** `admin`
-- **Password:** `password`
-
-⚠️ **Change this password immediately after first login!**
-
-## 📁 Important Files
-
-- `config/database.php` - Database configuration
-- `DEPLOYMENT.md` - Full deployment guide
-- `setup-xampp.sh` - Automated setup script
-- `.htaccess` - Apache configuration
-
-## 🔧 Common Issues
-
-### Database Connection Failed
-- Check MySQL is running: `sudo /opt/lampp/lampp statusmysql`
-- Verify credentials in `config/database.php`
-- Ensure database exists
-
-### Permission Denied
-```bash
-chmod 755 uploads/ logs/
-sudo chown daemon:daemon uploads/ logs/  # For XAMPP
+### Step 2: Access Dashboard
 ```
+http://localhost:8080/abbis3.2/modules/material-store-dashboard.php
+```
+OR from Resources page → Click **"📊 Material Store Dashboard"**
 
-### 404 Errors
-- Check `.htaccess` exists
-- Verify `mod_rewrite` is enabled
-- Check Apache error logs
+### Step 3: Transfer Materials from POS
+1. Click **"📦 Bulk Transfer from POS"**
+2. Add materials (Material Type + Quantity)
+3. Click **"Transfer All"** ✅
 
-## 📚 Full Documentation
+### Step 4: Use in Field Reports
+1. Create Field Report
+2. Select **"Company (Store/Warehouse)"** in Materials Provided By
+3. Enter received/used quantities
+4. System auto-calculates remaining and value ✅
 
-See `DEPLOYMENT.md` for:
-- Complete setup instructions
-- cPanel deployment guide
-- Troubleshooting
-- Security recommendations
+### Step 5: Return Unused Materials
+1. In Dashboard, click **"🔄 Return to POS"** on any material
+2. Enter quantity
+3. Confirm ✅
 
 ---
 
-**Need Help?** Check `DEPLOYMENT.md` for detailed troubleshooting.
+## 📍 Key Locations
 
+| What | Where |
+|------|-------|
+| **Dashboard** | Resources → Materials → "📊 Material Store Dashboard" |
+| **Transfer Materials** | Resources → Materials → "📦 Transfer from POS" |
+| **Use Materials** | Field Reports → New Report → Materials Section |
+| **View Analytics** | Material Store Dashboard → Analytics Section |
+
+---
+
+## 🎯 Most Common Tasks
+
+### Transfer Materials
+**Resources** → **Materials** → **"📦 Transfer from POS"** → Select item → Fill form → Transfer
+
+### Check Inventory
+**Material Store Dashboard** → View **Current Inventory** table
+
+### Use in Field Work
+**Field Reports** → New Report → Materials Provided By: **"Company (Store/Warehouse)"** → Enter quantities
+
+### Return Materials
+**Material Store Dashboard** → Find material → **"🔄 Return to POS"** → Enter quantity
+
+---
+
+## ⚠️ Important Notes
+
+1. **First Time**: Must run migration before using
+2. **Materials Flow**: POS → Material Store → Field Work → Return to POS
+3. **Auto-Calculations**: Remaining quantities and values calculate automatically
+4. **Low Stock**: Dashboard shows alerts when stock is low
+
+---
+
+**Full Guide**: See `MATERIAL_STORE_USER_GUIDE.md` for detailed instructions.

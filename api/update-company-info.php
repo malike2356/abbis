@@ -70,7 +70,13 @@ try {
         'company_tagline' => $_POST['config_company_tagline'] ?? '',
         'company_address' => $_POST['config_company_address'] ?? '',
         'company_contact' => $_POST['config_company_contact'] ?? '',
-        'company_email' => $_POST['config_company_email'] ?? ''
+        'company_email' => $_POST['config_company_email'] ?? '',
+        'currency' => $_POST['config_currency'] ?? '',
+        'receipt_email_subject' => $_POST['receipt_email_subject'] ?? '',
+        'receipt_footer' => $_POST['receipt_footer'] ?? '',
+        'receipt_terms' => $_POST['receipt_terms'] ?? '',
+        'receipt_show_qr' => isset($_POST['receipt_show_qr']) && $_POST['receipt_show_qr'] == '1' ? '1' : '0',
+        'company_phone' => $_POST['config_company_contact'] ?? '', // Alias for company_contact
     ];
     
     // Update each field

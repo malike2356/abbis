@@ -12,6 +12,7 @@ require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('hr.access');
 
 $pdo = getDBConnection();
 $action = $_GET['action'] ?? 'dashboard';
@@ -34,6 +35,15 @@ try {
 // Show warning if tables don't exist, but don't block access
 if (!$hrTablesExist) {
     flash('warning', 'HR database tables not fully initialized. Some features may not work. Please run the migration: <code>database/hr_system_migration.sql</code>');
+}
+
+// Ensure every worker has a staff identifier before continuing
+if ($hrTablesExist) {
+    try {
+        ensureAllWorkersHaveStaffIdentifiers($pdo);
+    } catch (Throwable $e) {
+        error_log('Failed to ensure staff identifiers for workers: ' . $e->getMessage());
+    }
 }
 
 // Initialize variables to prevent undefined variable errors
@@ -232,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
             case 'add_employee':
                 // Add new employee/worker
-                $employeeCode = sanitizeArray($_POST['employee_code'] ?? '');
+                $employeeCodeInput = sanitizeArray($_POST['employee_code'] ?? '');
                 $workerName = sanitizeArray($_POST['worker_name'] ?? '');
                 $role = sanitizeArray($_POST['role'] ?? '');
                 $employeeType = sanitizeArray($_POST['employee_type'] ?? 'worker');
@@ -247,11 +257,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Worker name is required');
                 }
                 
-                // Generate employee code if not provided
-                if (empty($employeeCode)) {
-                    $lastEmpStmt = $pdo->query("SELECT MAX(id) as max_id FROM workers");
-                    $lastEmp = $lastEmpStmt->fetch();
-                    $employeeCode = 'EMP-' . str_pad(($lastEmp['max_id'] ?? 0) + 1, 5, '0', STR_PAD_LEFT);
+                // Ensure a unique staff identifier exists
+                if ($employeeCodeInput === '') {
+                    $employeeCode = generateStaffIdentifier($pdo);
+                } else {
+                    $employeeCode = $employeeCodeInput;
+                    $duplicateCheck = $pdo->prepare("SELECT id FROM workers WHERE employee_code = ? LIMIT 1");
+                    $duplicateCheck->execute([$employeeCode]);
+                    if ($duplicateCheck->fetchColumn()) {
+                        throw new Exception('The staff ID ' . e($employeeCode) . ' is already assigned to another worker.');
+                    }
                 }
                 
                 $pdo->beginTransaction();
@@ -281,8 +296,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                     
+                    // Double-check that a staff identifier exists (safety for legacy DBs)
+                    ensureWorkerHasStaffIdentifier($pdo, (int) $workerId);
+                    
                     $pdo->commit();
-                    flash('success', 'Employee added successfully');
+                    flash('success', 'Employee added successfully. Staff ID: ' . e($employeeCode));
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     throw $e;
@@ -303,10 +321,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $departmentId = intval($_POST['department_id'] ?? 0) ?: null;
                 $positionId = intval($_POST['position_id'] ?? 0) ?: null;
                 $managerId = intval($_POST['manager_id'] ?? 0) ?: null;
-                $employeeCode = sanitizeArray($_POST['employee_code'] ?? '');
+                $employeeCodeInput = sanitizeArray($_POST['employee_code'] ?? '');
                 
                 if ($workerId <= 0) {
                     throw new Exception('Invalid worker ID');
+                }
+
+                if ($employeeCodeInput !== '') {
+                    $duplicateCheck = $pdo->prepare("SELECT id FROM workers WHERE employee_code = ? AND id != ? LIMIT 1");
+                    $duplicateCheck->execute([$employeeCodeInput, $workerId]);
+                    if ($duplicateCheck->fetchColumn()) {
+                        throw new Exception('The staff ID ' . e($employeeCodeInput) . ' is already assigned to another worker.');
+                    }
                 }
                 
                 $pdo->beginTransaction();
@@ -320,7 +346,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         WHERE id = ?
                     ");
                     $stmt->execute([$workerName, $role, $defaultRate, $contactNumber, $email, 
-                                   $employeeType, $status, $departmentId, $positionId, $managerId, $employeeCode, $workerId]);
+                                   $employeeType, $status, $departmentId, $positionId, $managerId, $employeeCodeInput, $workerId]);
+                    
+                    // Guarantee a staff identifier exists after the update
+                    ensureWorkerHasStaffIdentifier($pdo, $workerId);
                     
                     // Update primary role assignment if role changed
                     if (!empty($role)) {
@@ -532,6 +561,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('hr.php?action=departments');
                 break;
                 
+            case 'update_department':
+                $deptId = intval($_POST['id'] ?? 0);
+                $deptCode = sanitizeArray($_POST['department_code'] ?? '');
+                $deptName = sanitizeArray($_POST['department_name'] ?? '');
+                $description = sanitizeArray($_POST['description'] ?? '');
+                $managerId = intval($_POST['manager_id'] ?? 0) ?: null;
+                $isActive = isset($_POST['is_active']) ? 1 : 0;
+                
+                if ($deptId <= 0) {
+                    throw new Exception('Invalid department ID');
+                }
+                
+                if (empty($deptCode) || empty($deptName)) {
+                    throw new Exception('Department code and name are required');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE departments 
+                    SET department_code = ?, department_name = ?, description = ?, manager_id = ?, is_active = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$deptCode, $deptName, $description, $managerId, $isActive, $deptId]);
+                
+                flash('success', 'Department updated successfully');
+                redirect('hr.php?action=departments');
+                break;
+                
+            case 'delete_department':
+                $deptId = intval($_POST['id'] ?? 0);
+                
+                if ($deptId <= 0) {
+                    throw new Exception('Invalid department ID');
+                }
+                
+                // Check if department is used by any workers
+                $checkStmt = $pdo->prepare("SELECT COUNT(*) as count FROM workers WHERE department_id = ?");
+                $checkStmt->execute([$deptId]);
+                $result = $checkStmt->fetch();
+                
+                if ($result['count'] > 0) {
+                    // Can't delete, but can deactivate
+                    $stmt = $pdo->prepare("UPDATE departments SET is_active = 0 WHERE id = ?");
+                    $stmt->execute([$deptId]);
+                    flash('warning', 'Department cannot be deleted as it has employees. Status changed to inactive.');
+                } else {
+                    // Safe to delete
+                    $stmt = $pdo->prepare("DELETE FROM departments WHERE id = ?");
+                    $stmt->execute([$deptId]);
+                    flash('success', 'Department deleted successfully');
+                }
+                
+                redirect('hr.php?action=departments');
+                break;
+                
             case 'add_position':
                 $posCode = sanitizeArray($_POST['position_code'] ?? '');
                 $posTitle = sanitizeArray($_POST['position_title'] ?? '');
@@ -544,6 +627,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Position code and title are required');
                 }
                 
+                // Check if position code already exists
+                $checkStmt = $pdo->prepare("SELECT id FROM positions WHERE position_code = ?");
+                $checkStmt->execute([$posCode]);
+                if ($checkStmt->fetch()) {
+                    throw new Exception('Position code already exists');
+                }
+                
                 $stmt = $pdo->prepare("
                     INSERT INTO positions (position_code, position_title, department_id, description, min_salary, max_salary) 
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -551,6 +641,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$posCode, $posTitle, $departmentId, $description, $minSalary, $maxSalary]);
                 
                 flash('success', 'Position added successfully');
+                redirect('hr.php?action=positions');
+                break;
+                
+            case 'update_position':
+                $positionId = intval($_POST['id'] ?? 0);
+                $posCode = sanitizeArray($_POST['position_code'] ?? '');
+                $posTitle = sanitizeArray($_POST['position_title'] ?? '');
+                $departmentId = intval($_POST['department_id'] ?? 0) ?: null;
+                $description = sanitizeArray($_POST['description'] ?? '');
+                $minSalary = floatval($_POST['min_salary'] ?? 0);
+                $maxSalary = floatval($_POST['max_salary'] ?? 0);
+                $isActive = isset($_POST['is_active']) ? 1 : 0;
+                
+                if ($positionId <= 0) {
+                    throw new Exception('Invalid position ID');
+                }
+                
+                if (empty($posCode) || empty($posTitle)) {
+                    throw new Exception('Position code and title are required');
+                }
+                
+                // Check if position code already exists for another position
+                $checkStmt = $pdo->prepare("SELECT id FROM positions WHERE position_code = ? AND id != ?");
+                $checkStmt->execute([$posCode, $positionId]);
+                if ($checkStmt->fetch()) {
+                    throw new Exception('Position code already exists');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE positions 
+                    SET position_code = ?, position_title = ?, department_id = ?, description = ?, 
+                        min_salary = ?, max_salary = ?, is_active = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$posCode, $posTitle, $departmentId, $description, $minSalary, $maxSalary, $isActive, $positionId]);
+                
+                flash('success', 'Position updated successfully');
+                redirect('hr.php?action=positions');
+                break;
+                
+            case 'delete_position':
+                $positionId = intval($_POST['id'] ?? 0);
+                
+                if ($positionId <= 0) {
+                    throw new Exception('Invalid position ID');
+                }
+                
+                // Check if position is used by any workers
+                $checkStmt = $pdo->prepare("SELECT COUNT(*) as count FROM workers WHERE position_id = ?");
+                $checkStmt->execute([$positionId]);
+                $result = $checkStmt->fetch();
+                
+                if ($result['count'] > 0) {
+                    // Can't delete, but can deactivate
+                    $stmt = $pdo->prepare("UPDATE positions SET is_active = 0 WHERE id = ?");
+                    $stmt->execute([$positionId]);
+                    flash('warning', 'Position cannot be deleted as it is assigned to employees. Status changed to inactive.');
+                } else {
+                    // Safe to delete
+                    $stmt = $pdo->prepare("DELETE FROM positions WHERE id = ?");
+                    $stmt->execute([$positionId]);
+                    flash('success', 'Position deleted successfully');
+                }
+                
                 redirect('hr.php?action=positions');
                 break;
                 
@@ -573,6 +727,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$stakeholderCode, $stakeholderType, $fullName, $organization, $email, $phone, $currentUserId]);
                 
                 flash('success', 'Stakeholder added successfully');
+                redirect('hr.php?action=stakeholders');
+                break;
+                
+            case 'update_stakeholder':
+                $stakeholderId = intval($_POST['id'] ?? 0);
+                $stakeholderCode = sanitizeArray($_POST['stakeholder_code'] ?? '');
+                $stakeholderType = sanitizeArray($_POST['stakeholder_type'] ?? '');
+                $fullName = sanitizeArray($_POST['full_name'] ?? '');
+                $organization = sanitizeArray($_POST['organization'] ?? '');
+                $email = sanitizeArray($_POST['email'] ?? '');
+                $phone = sanitizeArray($_POST['phone'] ?? '');
+                $isActive = isset($_POST['is_active']) ? 1 : 0;
+                
+                if ($stakeholderId <= 0) {
+                    throw new Exception('Invalid stakeholder ID');
+                }
+                
+                if (empty($stakeholderCode) || empty($fullName) || empty($stakeholderType)) {
+                    throw new Exception('Stakeholder code, name, and type are required');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE stakeholders 
+                    SET stakeholder_code = ?, stakeholder_type = ?, full_name = ?, organization = ?, 
+                        email = ?, phone = ?, is_active = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$stakeholderCode, $stakeholderType, $fullName, $organization, $email, $phone, $isActive, $stakeholderId]);
+                
+                flash('success', 'Stakeholder updated successfully');
+                redirect('hr.php?action=stakeholders');
+                break;
+                
+            case 'delete_stakeholder':
+                $stakeholderId = intval($_POST['id'] ?? 0);
+                
+                if ($stakeholderId <= 0) {
+                    throw new Exception('Invalid stakeholder ID');
+                }
+                
+                // Check if stakeholder has communications
+                $checkStmt = $pdo->prepare("SELECT COUNT(*) as count FROM stakeholder_communications WHERE stakeholder_id = ?");
+                $checkStmt->execute([$stakeholderId]);
+                $result = $checkStmt->fetch();
+                
+                if ($result['count'] > 0) {
+                    // Can't delete, but can deactivate
+                    $stmt = $pdo->prepare("UPDATE stakeholders SET is_active = 0 WHERE id = ?");
+                    $stmt->execute([$stakeholderId]);
+                    flash('warning', 'Stakeholder cannot be deleted as it has communications. Status changed to inactive.');
+                } else {
+                    // Safe to delete
+                    $stmt = $pdo->prepare("DELETE FROM stakeholders WHERE id = ?");
+                    $stmt->execute([$stakeholderId]);
+                    flash('success', 'Stakeholder deleted successfully');
+                }
+                
                 redirect('hr.php?action=stakeholders');
                 break;
                 
@@ -616,6 +827,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$workerId, $attendanceDate, $timeIn, $timeOut, $totalHours, $overtimeHours, $attendanceStatus, $notes, $currentUserId]);
                 
                 flash('success', 'Attendance recorded successfully');
+                redirect('hr.php?action=attendance');
+                break;
+                
+            case 'update_attendance':
+                $attendanceId = intval($_POST['id'] ?? 0);
+                $workerId = intval($_POST['worker_id'] ?? 0);
+                $attendanceDate = sanitizeArray($_POST['attendance_date'] ?? date('Y-m-d'));
+                $timeIn = sanitizeArray($_POST['time_in'] ?? null) ?: null;
+                $timeOut = sanitizeArray($_POST['time_out'] ?? null) ?: null;
+                $attendanceStatus = sanitizeArray($_POST['attendance_status'] ?? 'present');
+                $notes = sanitizeArray($_POST['notes'] ?? '');
+                
+                if ($attendanceId <= 0 || $workerId <= 0) {
+                    throw new Exception('Invalid attendance record');
+                }
+                
+                // Calculate hours if time in/out provided
+                $totalHours = 0;
+                $overtimeHours = 0;
+                if ($timeIn && $timeOut) {
+                    $start = strtotime($timeIn);
+                    $end = strtotime($timeOut);
+                    $totalHours = ($end - $start) / 3600;
+                    if ($totalHours > 8) {
+                        $overtimeHours = $totalHours - 8;
+                    }
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE attendance_records 
+                    SET worker_id = ?, attendance_date = ?, time_in = ?, time_out = ?, 
+                        total_hours = ?, overtime_hours = ?, attendance_status = ?, notes = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$workerId, $attendanceDate, $timeIn, $timeOut, $totalHours, $overtimeHours, $attendanceStatus, $notes, $attendanceId]);
+                
+                flash('success', 'Attendance updated successfully');
+                redirect('hr.php?action=attendance');
+                break;
+                
+            case 'delete_attendance':
+                $attendanceId = intval($_POST['id'] ?? 0);
+                
+                if ($attendanceId <= 0) {
+                    throw new Exception('Invalid attendance record');
+                }
+                
+                $stmt = $pdo->prepare("DELETE FROM attendance_records WHERE id = ?");
+                $stmt->execute([$attendanceId]);
+                
+                flash('success', 'Attendance record deleted successfully');
                 redirect('hr.php?action=attendance');
                 break;
                 
@@ -697,6 +959,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('hr.php?action=leave');
                 break;
                 
+            case 'update_leave_request':
+                $requestId = intval($_POST['id'] ?? 0);
+                $workerId = intval($_POST['worker_id'] ?? 0);
+                $leaveTypeId = intval($_POST['leave_type_id'] ?? 0);
+                $startDate = sanitizeArray($_POST['start_date'] ?? '');
+                $endDate = sanitizeArray($_POST['end_date'] ?? '');
+                $reason = sanitizeArray($_POST['reason'] ?? '');
+                
+                if ($requestId <= 0 || $workerId <= 0 || $leaveTypeId <= 0 || empty($startDate) || empty($endDate)) {
+                    throw new Exception('All fields are required');
+                }
+                
+                // Calculate total days
+                $start = new DateTime($startDate);
+                $end = new DateTime($endDate);
+                $totalDays = $start->diff($end)->days + 1;
+                
+                $stmt = $pdo->prepare("
+                    UPDATE leave_requests 
+                    SET worker_id = ?, leave_type_id = ?, start_date = ?, end_date = ?, 
+                        total_days = ?, reason = ?, updated_at = NOW()
+                    WHERE id = ? AND status = 'pending'
+                ");
+                $stmt->execute([$workerId, $leaveTypeId, $startDate, $endDate, $totalDays, $reason, $requestId]);
+                
+                if ($stmt->rowCount() > 0) {
+                    flash('success', 'Leave request updated successfully');
+                } else {
+                    flash('warning', 'Leave request cannot be updated as it is already approved/rejected');
+                }
+                
+                redirect('hr.php?action=leave');
+                break;
+                
+            case 'delete_leave_request':
+                $requestId = intval($_POST['id'] ?? 0);
+                
+                if ($requestId <= 0) {
+                    throw new Exception('Invalid leave request');
+                }
+                
+                // Only allow deletion of pending requests
+                $stmt = $pdo->prepare("DELETE FROM leave_requests WHERE id = ? AND status = 'pending'");
+                $stmt->execute([$requestId]);
+                
+                if ($stmt->rowCount() > 0) {
+                    flash('success', 'Leave request deleted successfully');
+                } else {
+                    flash('warning', 'Only pending leave requests can be deleted');
+                }
+                
+                redirect('hr.php?action=leave');
+                break;
+                
             case 'add_performance_review':
                 $workerId = intval($_POST['worker_id'] ?? 0);
                 $reviewPeriodStart = sanitizeArray($_POST['review_period_start'] ?? '');
@@ -725,6 +1041,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                $reviewerId, $overallRating, $strengths, $areasForImprovement, $goals, $recommendations, $currentUserId]);
                 
                 flash('success', 'Performance review created successfully');
+                redirect('hr.php?action=performance');
+                break;
+                
+            case 'update_performance_review':
+                $reviewId = intval($_POST['id'] ?? 0);
+                $workerId = intval($_POST['worker_id'] ?? 0);
+                $reviewPeriodStart = sanitizeArray($_POST['review_period_start'] ?? '');
+                $reviewPeriodEnd = sanitizeArray($_POST['review_period_end'] ?? '');
+                $reviewType = sanitizeArray($_POST['review_type'] ?? 'annual');
+                $reviewerId = intval($_POST['reviewer_id'] ?? $currentUserId);
+                $overallRating = floatval($_POST['overall_rating'] ?? 0);
+                $strengths = sanitizeArray($_POST['strengths'] ?? '');
+                $areasForImprovement = sanitizeArray($_POST['areas_for_improvement'] ?? '');
+                $goals = sanitizeArray($_POST['goals'] ?? '');
+                $recommendations = sanitizeArray($_POST['recommendations'] ?? '');
+                
+                if ($reviewId <= 0 || $workerId <= 0 || empty($reviewPeriodStart) || empty($reviewPeriodEnd)) {
+                    throw new Exception('All required fields must be provided');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE performance_reviews 
+                    SET worker_id = ?, review_period_start = ?, review_period_end = ?, 
+                        review_type = ?, reviewer_id = ?, overall_rating = ?, strengths = ?, 
+                        areas_for_improvement = ?, goals = ?, recommendations = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$workerId, $reviewPeriodStart, $reviewPeriodEnd, $reviewType, 
+                               $reviewerId, $overallRating, $strengths, $areasForImprovement, $goals, $recommendations, $reviewId]);
+                
+                flash('success', 'Performance review updated successfully');
+                redirect('hr.php?action=performance');
+                break;
+                
+            case 'delete_performance_review':
+                $reviewId = intval($_POST['id'] ?? 0);
+                
+                if ($reviewId <= 0) {
+                    throw new Exception('Invalid performance review');
+                }
+                
+                $stmt = $pdo->prepare("DELETE FROM performance_reviews WHERE id = ?");
+                $stmt->execute([$reviewId]);
+                
+                flash('success', 'Performance review deleted successfully');
                 redirect('hr.php?action=performance');
                 break;
                 
@@ -759,6 +1120,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('hr.php?action=training');
                 break;
                 
+            case 'update_training':
+                $trainingId = intval($_POST['id'] ?? 0);
+                $workerId = intval($_POST['worker_id'] ?? 0);
+                $trainingTitle = sanitizeArray($_POST['training_title'] ?? '');
+                $trainingType = sanitizeArray($_POST['training_type'] ?? 'internal');
+                $provider = sanitizeArray($_POST['provider'] ?? '');
+                $startDate = sanitizeArray($_POST['start_date'] ?? '');
+                $endDate = sanitizeArray($_POST['end_date'] ?? null) ?: null;
+                $durationHours = floatval($_POST['duration_hours'] ?? 0);
+                $cost = floatval($_POST['cost'] ?? 0);
+                $certificateNumber = sanitizeArray($_POST['certificate_number'] ?? '');
+                $certificateExpiry = sanitizeArray($_POST['certificate_expiry'] ?? null) ?: null;
+                $status = sanitizeArray($_POST['status'] ?? 'pending');
+                
+                if ($trainingId <= 0 || $workerId <= 0 || empty($trainingTitle) || empty($startDate)) {
+                    throw new Exception('All required fields must be provided');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE training_records 
+                    SET worker_id = ?, training_title = ?, training_type = ?, provider = ?,
+                        start_date = ?, end_date = ?, duration_hours = ?, cost = ?, 
+                        certificate_number = ?, certificate_expiry = ?, status = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$workerId, $trainingTitle, $trainingType, $provider, $startDate, 
+                               $endDate, $durationHours, $cost, $certificateNumber, $certificateExpiry, $status, $trainingId]);
+                
+                flash('success', 'Training record updated successfully');
+                redirect('hr.php?action=training');
+                break;
+                
+            case 'delete_training':
+                $trainingId = intval($_POST['id'] ?? 0);
+                
+                if ($trainingId <= 0) {
+                    throw new Exception('Invalid training record');
+                }
+                
+                $stmt = $pdo->prepare("DELETE FROM training_records WHERE id = ?");
+                $stmt->execute([$trainingId]);
+                
+                flash('success', 'Training record deleted successfully');
+                redirect('hr.php?action=training');
+                break;
+                
             case 'add_stakeholder_communication':
                 $stakeholderId = intval($_POST['stakeholder_id'] ?? 0);
                 $communicationType = sanitizeArray($_POST['communication_type'] ?? '');
@@ -779,6 +1186,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 flash('success', 'Communication logged successfully');
                 redirect('hr.php?action=stakeholders&view=' . $stakeholderId);
+                break;
+                
+            case 'update_stakeholder_communication':
+                $commId = intval($_POST['id'] ?? 0);
+                $stakeholderId = intval($_POST['stakeholder_id'] ?? 0);
+                $communicationType = sanitizeArray($_POST['communication_type'] ?? '');
+                $subject = sanitizeArray($_POST['subject'] ?? '');
+                $message = sanitizeArray($_POST['message'] ?? '');
+                $communicationDate = sanitizeArray($_POST['communication_date'] ?? date('Y-m-d H:i:s'));
+                
+                if ($commId <= 0 || $stakeholderId <= 0 || empty($communicationType)) {
+                    throw new Exception('All required fields must be provided');
+                }
+                
+                $stmt = $pdo->prepare("
+                    UPDATE stakeholder_communications 
+                    SET stakeholder_id = ?, communication_type = ?, subject = ?, message = ?, 
+                        communication_date = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmt->execute([$stakeholderId, $communicationType, $subject, $message, $communicationDate, $commId]);
+                
+                flash('success', 'Communication updated successfully');
+                redirect('hr.php?action=stakeholders&view=' . $stakeholderId);
+                break;
+                
+            case 'delete_stakeholder_communication':
+                $commId = intval($_POST['id'] ?? 0);
+                $stakeholderId = intval($_POST['stakeholder_id'] ?? 0);
+                
+                if ($commId <= 0) {
+                    throw new Exception('Invalid communication record');
+                }
+                
+                $stmt = $pdo->prepare("DELETE FROM stakeholder_communications WHERE id = ?");
+                $stmt->execute([$commId]);
+                
+                flash('success', 'Communication deleted successfully');
+                redirect('hr.php?action=stakeholders&view=' . ($stakeholderId > 0 ? $stakeholderId : ''));
                 break;
         }
     } catch (Exception $e) {
@@ -1386,7 +1832,7 @@ require_once '../includes/header.php';
 <div class="page-header">
     <div>
         <h1>Human Resources Management</h1>
-        <p>Manage staff, workers, and stakeholders</p>
+        <p>Manage staff, recruitment pipelines, and stakeholders</p>
     </div>
 </div>
 
@@ -1422,6 +1868,11 @@ require_once '../includes/header.php';
     <a href="hr.php?action=roles" class="hr-tab <?php echo $action === 'roles' ? 'active' : ''; ?>">
         👔 Roles
     </a>
+    <?php if ($auth->userHasPermission('recruitment.access')): ?>
+        <a href="recruitment.php" class="hr-tab" style="display:flex; align-items:center; gap:6px;">
+            🧑‍💼 Recruitment
+        </a>
+    <?php endif; ?>
 </div>
 
 <?php if ($action === 'dashboard'): ?>
@@ -1488,7 +1939,7 @@ require_once '../includes/header.php';
                 <table class="hr-table">
                     <thead>
                         <tr>
-                            <th>Code</th>
+                            <th>Staff ID</th>
                             <th>Name</th>
                             <th>Role</th>
                             <th>Department</th>
@@ -1521,6 +1972,9 @@ require_once '../includes/header.php';
                 <a href="hr.php?action=attendance" class="btn btn-secondary">Record Attendance</a>
                 <a href="hr.php?action=leave" class="btn btn-secondary">Manage Leave</a>
                 <a href="hr.php?action=stakeholders" class="btn btn-secondary">Add Stakeholder</a>
+                <?php if ($auth->userHasPermission('recruitment.access')): ?>
+                    <a href="recruitment.php" class="btn btn-secondary">Open Recruitment Pipeline</a>
+                <?php endif; ?>
             </div>
             
             <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border);">
@@ -1631,8 +2085,8 @@ require_once '../includes/header.php';
             <input type="hidden" name="worker_id" id="employeeWorkerId" value="">
             
             <div class="form-group">
-                <label>Employee Code</label>
-                <input type="text" name="employee_code" class="form-control" placeholder="Auto-generated if empty">
+                <label>Staff ID</label>
+                <input type="text" name="employee_code" class="form-control" placeholder="Leave blank to auto-generate">
             </div>
             <div class="form-group">
                 <label>Name *</label>
@@ -2109,6 +2563,7 @@ require_once '../includes/header.php';
                     <th>Manager</th>
                     <th>Employees</th>
                     <th>Status</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -2123,6 +2578,10 @@ require_once '../includes/header.php';
                                 <?php echo $dept['is_active'] ? 'Active' : 'Inactive'; ?>
                             </span>
                         </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="editDepartment(<?php echo $dept['id']; ?>)">Edit</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="deleteDepartment(<?php echo $dept['id']; ?>)">Delete</button>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -2132,45 +2591,10 @@ require_once '../includes/header.php';
 <?php elseif ($action === 'positions'): ?>
     <!-- Positions -->
     <div class="hr-form-card">
-        <h2>Add Position</h2>
-        <form method="POST" class="hr-form-grid">
-            <?php echo CSRF::getTokenField(); ?>
-            <input type="hidden" name="action" value="add_position">
-            
-            <div class="form-group">
-                <label>Position Code *</label>
-                <input type="text" name="position_code" class="form-control" required>
-            </div>
-            <div class="form-group">
-                <label>Position Title *</label>
-                <input type="text" name="position_title" class="form-control" required>
-            </div>
-            <div class="form-group">
-                <label>Department</label>
-                <select name="department_id" class="form-control">
-                    <option value="">Select Department</option>
-                    <?php foreach ($departments as $dept): ?>
-                        <option value="<?php echo $dept['id']; ?>"><?php echo e($dept['department_name']); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Min Salary</label>
-                <input type="number" name="min_salary" class="form-control" step="0.01" value="0">
-            </div>
-            <div class="form-group">
-                <label>Max Salary</label>
-                <input type="number" name="max_salary" class="form-control" step="0.01" value="0">
-            </div>
-            <div class="form-group">
-                <label>Description</label>
-                <textarea name="description" class="form-control" rows="3"></textarea>
-            </div>
-            <div class="form-group">
-                <label>&nbsp;</label>
-                <button type="submit" class="btn btn-primary">Add Position</button>
-            </div>
-        </form>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2 id="positionFormTitle">Add Position</h2>
+            <button type="button" class="btn btn-primary" onclick="showPositionModal()">Add New Position</button>
+        </div>
     </div>
 
     <div class="hr-table-wrapper">
@@ -2183,32 +2607,208 @@ require_once '../includes/header.php';
                     <th>Salary Range</th>
                     <th>Employees</th>
                     <th>Status</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($positions as $pos): ?>
+                <?php if (empty($positions)): ?>
                     <tr>
-                        <td><?php echo e($pos['position_code']); ?></td>
-                        <td><?php echo e($pos['position_title']); ?></td>
-                        <td><?php echo e($pos['department_name'] ?? '-'); ?></td>
-                        <td>
-                            <?php if ($pos['min_salary'] > 0 || $pos['max_salary'] > 0): ?>
-                                <?php echo formatCurrency($pos['min_salary']); ?> - <?php echo formatCurrency($pos['max_salary']); ?>
-                            <?php else: ?>
-                                -
-                            <?php endif; ?>
-                        </td>
-                        <td><?php echo $pos['employee_count']; ?></td>
-                        <td>
-                            <span class="badge badge-<?php echo $pos['is_active'] ? 'active' : 'inactive'; ?>">
-                                <?php echo $pos['is_active'] ? 'Active' : 'Inactive'; ?>
-                            </span>
+                        <td colspan="7" style="text-align: center; padding: 40px; color: var(--secondary);">
+                            No positions defined. Click "Add New Position" to create one.
                         </td>
                     </tr>
-                <?php endforeach; ?>
+                <?php else: ?>
+                    <?php foreach ($positions as $pos): ?>
+                        <tr>
+                            <td><?php echo e($pos['position_code']); ?></td>
+                            <td><?php echo e($pos['position_title']); ?></td>
+                            <td><?php echo e($pos['department_name'] ?? '-'); ?></td>
+                            <td>
+                                <?php if ($pos['min_salary'] > 0 || $pos['max_salary'] > 0): ?>
+                                    <?php echo formatCurrency($pos['min_salary']); ?> - <?php echo formatCurrency($pos['max_salary']); ?>
+                                <?php else: ?>
+                                    -
+                                <?php endif; ?>
+                            </td>
+                            <td><?php echo $pos['employee_count']; ?></td>
+                            <td>
+                                <span class="badge badge-<?php echo $pos['is_active'] ? 'active' : 'inactive'; ?>">
+                                    <?php echo $pos['is_active'] ? 'Active' : 'Inactive'; ?>
+                                </span>
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-primary edit-position-btn" 
+                                        data-position-id="<?php echo htmlspecialchars($pos['id']); ?>"
+                                        data-position-code="<?php echo htmlspecialchars($pos['position_code']); ?>"
+                                        data-position-title="<?php echo htmlspecialchars($pos['position_title']); ?>"
+                                        data-position-dept="<?php echo htmlspecialchars($pos['department_id'] ?? ''); ?>"
+                                        data-position-min-salary="<?php echo htmlspecialchars($pos['min_salary'] ?? 0); ?>"
+                                        data-position-max-salary="<?php echo htmlspecialchars($pos['max_salary'] ?? 0); ?>"
+                                        data-position-description="<?php echo htmlspecialchars($pos['description'] ?? ''); ?>"
+                                        data-position-active="<?php echo $pos['is_active'] ? '1' : '0'; ?>"
+                                        onclick="editPositionFromButton(this)">Edit</button>
+                                <button type="button" class="btn btn-sm btn-danger" 
+                                        onclick="deletePosition(<?php echo $pos['id']; ?>, '<?php echo e($pos['position_title']); ?>')">Delete</button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </tbody>
         </table>
     </div>
+
+    <!-- Position Modal -->
+    <div id="positionModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="positionModalTitle">Add Position</h2>
+                <button type="button" class="modal-close" onclick="closePositionModal()">&times;</button>
+            </div>
+            <form method="POST" action="hr.php?action=positions" id="positionForm">
+                <?php echo CSRF::getTokenField(); ?>
+                <input type="hidden" name="action" id="positionAction" value="add_position">
+                <input type="hidden" name="id" id="positionId" value="">
+                
+                <div class="form-group">
+                    <label for="position_code" class="form-label">Position Code *</label>
+                    <input type="text" id="position_code" name="position_code" class="form-control" required 
+                           placeholder="e.g., POS001">
+                </div>
+                
+                <div class="form-group">
+                    <label for="position_title" class="form-label">Position Title *</label>
+                    <input type="text" id="position_title" name="position_title" class="form-control" required 
+                           placeholder="e.g., Senior Driller">
+                </div>
+                
+                <div class="form-group">
+                    <label for="position_department" class="form-label">Department</label>
+                    <select id="position_department" name="department_id" class="form-control">
+                        <option value="">Select Department</option>
+                        <?php foreach ($departments as $dept): ?>
+                            <option value="<?php echo $dept['id']; ?>"><?php echo e($dept['department_name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="position_min_salary" class="form-label">Min Salary</label>
+                    <input type="number" id="position_min_salary" name="min_salary" class="form-control" step="0.01" value="0">
+                </div>
+                
+                <div class="form-group">
+                    <label for="position_max_salary" class="form-label">Max Salary</label>
+                    <input type="number" id="position_max_salary" name="max_salary" class="form-control" step="0.01" value="0">
+                </div>
+                
+                <div class="form-group">
+                    <label for="position_description" class="form-label">Description</label>
+                    <textarea id="position_description" name="description" class="form-control" rows="3" 
+                              placeholder="Brief description of this position"></textarea>
+                </div>
+                
+                <div class="form-group" id="positionActiveGroup" style="display: none;">
+                    <label>
+                        <input type="checkbox" id="position_is_active" name="is_active" value="1" checked>
+                        Active
+                    </label>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="button" class="btn btn-outline" onclick="closePositionModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function showPositionModal() {
+        document.getElementById('positionModal').style.display = 'block';
+        document.getElementById('positionModalTitle').textContent = 'Add Position';
+        document.getElementById('positionAction').value = 'add_position';
+        document.getElementById('positionId').value = '';
+        document.getElementById('positionForm').reset();
+        document.getElementById('positionActiveGroup').style.display = 'none';
+        document.getElementById('position_is_active').checked = true;
+    }
+    
+    function editPositionFromButton(button) {
+        const positionId = button.getAttribute('data-position-id');
+        const positionCode = button.getAttribute('data-position-code');
+        const positionTitle = button.getAttribute('data-position-title');
+        const positionDept = button.getAttribute('data-position-dept');
+        const positionMinSalary = button.getAttribute('data-position-min-salary');
+        const positionMaxSalary = button.getAttribute('data-position-max-salary');
+        const positionDescription = button.getAttribute('data-position-description');
+        const positionActive = button.getAttribute('data-position-active');
+        
+        if (!positionId) {
+            alert('Error: Missing position ID');
+            return;
+        }
+        
+        document.getElementById('positionModal').style.display = 'block';
+        document.getElementById('positionModalTitle').textContent = 'Edit Position';
+        document.getElementById('positionAction').value = 'update_position';
+        document.getElementById('positionId').value = positionId;
+        document.getElementById('position_code').value = positionCode || '';
+        document.getElementById('position_title').value = positionTitle || '';
+        document.getElementById('position_department').value = positionDept || '';
+        document.getElementById('position_min_salary').value = positionMinSalary || '0';
+        document.getElementById('position_max_salary').value = positionMaxSalary || '0';
+        document.getElementById('position_description').value = positionDescription || '';
+        document.getElementById('position_is_active').checked = positionActive === '1';
+        document.getElementById('positionActiveGroup').style.display = 'block';
+    }
+    
+    function closePositionModal() {
+        document.getElementById('positionModal').style.display = 'none';
+    }
+    
+    function deletePosition(positionId, positionTitle) {
+        if (!confirm(`Are you sure you want to delete position "${positionTitle}"?\n\nIf this position is assigned to employees, it will be deactivated instead of deleted.`)) {
+            return;
+        }
+        
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=positions';
+        form.style.display = 'none';
+        
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_position';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = positionId;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+    
+    // Close modal when clicking outside (only for position modal)
+    document.addEventListener('click', function(event) {
+        const positionModal = document.getElementById('positionModal');
+        if (positionModal && event.target === positionModal) {
+            closePositionModal();
+        }
+    });
+    </script>
 
 <?php elseif ($action === 'attendance'): ?>
     <!-- Attendance -->
@@ -2291,6 +2891,7 @@ require_once '../includes/header.php';
                     <th>Time Out</th>
                     <th>Hours</th>
                     <th>Status</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -2307,11 +2908,15 @@ require_once '../includes/header.php';
                                     <?php echo ucfirst($record['attendance_status']); ?>
                                 </span>
                             </td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="editAttendance(<?php echo $record['id']; ?>)">Edit</button>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteAttendance(<?php echo $record['id']; ?>)">Delete</button>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px; color: var(--secondary);">No attendance records found</td>
+                        <td colspan="7" style="text-align: center; padding: 40px; color: var(--secondary);">No attendance records found</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -2451,6 +3056,8 @@ require_once '../includes/header.php';
                                         <input type="text" name="rejection_reason" placeholder="Rejection reason" class="form-control" style="display: inline; width: 150px; margin-left: 5px;">
                                         <button type="submit" class="btn btn-sm btn-secondary">Reject</button>
                                     </form>
+                                    <button type="button" class="btn btn-sm btn-primary" onclick="editLeaveRequest(<?php echo $request['id']; ?>)" style="margin-left: 5px;">Edit</button>
+                                    <button type="button" class="btn btn-sm btn-danger" onclick="deleteLeaveRequest(<?php echo $request['id']; ?>)">Delete</button>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -2550,6 +3157,7 @@ require_once '../includes/header.php';
                     <th>Rating</th>
                     <th>Reviewer</th>
                     <th>Status</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -2567,11 +3175,15 @@ require_once '../includes/header.php';
                                     <?php echo ucfirst($review['status']); ?>
                                 </span>
                             </td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="editPerformanceReview(<?php echo $review['id']; ?>)">Edit</button>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="deletePerformanceReview(<?php echo $review['id']; ?>)">Delete</button>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="7" style="text-align: center; padding: 40px; color: var(--secondary);">No performance reviews found</td>
+                        <td colspan="8" style="text-align: center; padding: 40px; color: var(--secondary);">No performance reviews found</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -2657,6 +3269,7 @@ require_once '../includes/header.php';
                             <th>Training</th>
                             <th>Start Date</th>
                             <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2672,11 +3285,15 @@ require_once '../includes/header.php';
                                             <?php echo ucfirst($training['status']); ?>
                                         </span>
                                     </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-primary" onclick="editTraining(<?php echo $training['id']; ?>)">Edit</button>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteTraining(<?php echo $training['id']; ?>)">Delete</button>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="5" style="text-align: center; padding: 20px; color: var(--secondary);">No training records found</td>
+                                <td colspan="6" style="text-align: center; padding: 20px; color: var(--secondary);">No training records found</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -3022,6 +3639,8 @@ require_once '../includes/header.php';
                         </td>
                         <td>
                             <a href="hr.php?action=stakeholders&view=<?php echo $stakeholder['id']; ?>" class="btn btn-sm btn-secondary">View</a>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="editStakeholder(<?php echo $stakeholder['id']; ?>)">Edit</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="deleteStakeholder(<?php echo $stakeholder['id']; ?>)">Delete</button>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -3093,6 +3712,7 @@ require_once '../includes/header.php';
                                         <th>Subject</th>
                                         <th>Message</th>
                                         <th>Initiated By</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -3103,6 +3723,10 @@ require_once '../includes/header.php';
                                             <td><?php echo e($comm['subject'] ?? '-'); ?></td>
                                             <td><?php echo e(substr($comm['message'] ?? '', 0, 100)) . (strlen($comm['message'] ?? '') > 100 ? '...' : ''); ?></td>
                                             <td><?php echo e($comm['initiated_by_user'] ?? '-'); ?></td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-primary" onclick="editStakeholderCommunication(<?php echo $comm['id']; ?>, <?php echo $selectedStakeholder['id']; ?>)">Edit</button>
+                                                <button type="button" class="btn btn-sm btn-danger" onclick="deleteStakeholderCommunication(<?php echo $comm['id']; ?>, <?php echo $selectedStakeholder['id']; ?>)">Delete</button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -3724,7 +4348,16 @@ async function addRoleAssignment() {
         }
     } catch (error) {
         console.error('Error adding role:', error);
-        alert('Error adding role: ' + error.message);
+        // Try to parse error response
+        if (error.response) {
+            error.response.json().then(result => {
+                alert('Error: ' + (result.message || error.message));
+            }).catch(() => {
+                alert('Error adding role: ' + error.message);
+            });
+        } else {
+            alert('Error adding role: ' + error.message);
+        }
     }
 }
 
@@ -4065,8 +4698,8 @@ function closeRigPreferencesModal() {
 }
 
 // Add spinner animation
-const style = document.createElement('style');
-style.textContent = `
+const spinnerStyle = document.createElement('style');
+spinnerStyle.textContent = `
     @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
@@ -4108,7 +4741,7 @@ style.textContent = `
         color: var(--text);
     }
 `;
-document.head.appendChild(style);
+document.head.appendChild(spinnerStyle);
 
 // Delete employee from button
 function deleteEmployeeFromButton(button) {
@@ -4202,40 +4835,54 @@ function showRoleModal() {
 }
 
 // Edit role from button (using data attributes)
-function editRoleFromButton(button) {
-    try {
-        const roleId = button.getAttribute('data-role-id');
-        const roleName = button.getAttribute('data-role-name');
-        const roleDescription = button.getAttribute('data-role-description') || '';
-        const isSystem = button.getAttribute('data-role-system') === '1' || button.getAttribute('data-role-system') === 'true';
-        
-        if (!roleId || !roleName) {
-            console.error('Missing role data:', { roleId, roleName });
-            alert('Error: Missing role data. Please refresh the page and try again.');
-            return;
+// Ensure function is globally accessible
+if (typeof editRoleFromButton === 'undefined') {
+    window.editRoleFromButton = function(button) {
+        try {
+            const roleId = button.getAttribute('data-role-id');
+            const roleName = button.getAttribute('data-role-name');
+            const roleDescription = button.getAttribute('data-role-description') || '';
+            const isSystem = button.getAttribute('data-role-system') === '1' || button.getAttribute('data-role-system') === 'true';
+            
+            if (!roleId || !roleName) {
+                console.error('Missing role data:', { roleId, roleName });
+                alert('Error: Missing role data. Please refresh the page and try again.');
+                return;
+            }
+            
+            // Check if it's a system role
+            if (isSystem) {
+                alert('System roles cannot be edited. They are protected by the system.');
+                return;
+            }
+            
+            // Call editRole if it exists
+            if (typeof editRole === 'function') {
+                editRole({
+                    id: roleId,
+                    role_name: roleName,
+                    description: roleDescription
+                });
+            } else {
+                console.error('editRole function not found');
+                alert('Error: Edit function not available. Please refresh the page.');
+            }
+        } catch (error) {
+            console.error('Error in editRoleFromButton:', error);
+            alert('An error occurred while trying to edit the role. Please check the console for details.');
         }
-        
-        // Check if it's a system role
-        if (isSystem) {
-            alert('System roles cannot be edited. They are protected by the system.');
-            return;
-        }
-        
-        editRole({
-            id: roleId,
-            role_name: roleName,
-            description: roleDescription
-        });
-    } catch (error) {
-        console.error('Error in editRoleFromButton:', error);
-        alert('An error occurred while trying to edit the role. Please check the console for details.');
-    }
+    };
+} else {
+    // Function already exists, just ensure it's on window
+    window.editRoleFromButton = editRoleFromButton;
 }
 
-function editRole(role) {
-    try {
-        // Handle both object and JSON string
-        let roleData = role;
+// Ensure editRole is globally accessible
+if (typeof editRole === 'undefined') {
+    window.editRole = function(role) {
+        try {
+            // Handle both object and JSON string
+            let roleData = role;
         if (typeof role === 'string') {
             try {
                 roleData = JSON.parse(role);
@@ -4309,10 +4956,14 @@ function editRole(role) {
                 nameInput.focus();
             }, 100);
         }
-    } catch (error) {
-        console.error('Error in editRole function:', error);
-        alert('An error occurred while opening the edit form. Please check the console for details.');
-    }
+        } catch (error) {
+            console.error('Error in editRole function:', error);
+            alert('An error occurred while opening the edit form. Please check the console for details.');
+        }
+    };
+} else {
+    // Function already exists, just ensure it's on window
+    window.editRole = editRole;
 }
 
 function closeRoleModal() {
@@ -4355,7 +5006,7 @@ function toggleRole(id, isActive) {
 }
 
 function deleteRole(id) {
-    if (confirm('Are you sure you want to delete this role? This action cannot be undone.')) {
+    if (confirm('Are you sure you want to delete this role? This action cannot be undone. If the role is assigned to workers, you must remove it from all workers first.')) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = 'hr.php?action=roles';
@@ -4453,8 +5104,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Modal styling
-const style = document.createElement('style');
-style.textContent = `
+const modalStyle = document.createElement('style');
+modalStyle.textContent = `
     .modal {
         display: none;
         position: fixed;
@@ -4507,7 +5158,375 @@ style.textContent = `
         justify-content: flex-end;
     }
 `;
-document.head.appendChild(style);
+document.head.appendChild(modalStyle);
+
+// CRUD Functions for all HR entities
+function editDepartment(id) {
+    // Fetch department data and populate form
+    fetch(`hr.php?action=departments&get_department=${id}`)
+        .then(r => r.text())
+        .then(html => {
+            // For now, use a simple prompt-based edit
+            // In production, you'd want a proper modal
+            const deptCode = prompt('Department Code:');
+            if (deptCode === null) return;
+            const deptName = prompt('Department Name:');
+            if (deptName === null) return;
+            const description = prompt('Description (optional):', '') || '';
+            
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'hr.php?action=departments';
+            
+            const csrfToken = document.querySelector('[name="csrf_token"]');
+            if (csrfToken) {
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = csrfToken.value;
+                form.appendChild(csrfInput);
+            }
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'update_department';
+            form.appendChild(actionInput);
+            
+            const idInput = document.createElement('input');
+            idInput.type = 'hidden';
+            idInput.name = 'id';
+            idInput.value = id;
+            form.appendChild(idInput);
+            
+            const codeInput = document.createElement('input');
+            codeInput.type = 'hidden';
+            codeInput.name = 'department_code';
+            codeInput.value = deptCode;
+            form.appendChild(codeInput);
+            
+            const nameInput = document.createElement('input');
+            nameInput.type = 'hidden';
+            nameInput.name = 'department_name';
+            nameInput.value = deptName;
+            form.appendChild(nameInput);
+            
+            const descInput = document.createElement('input');
+            descInput.type = 'hidden';
+            descInput.name = 'description';
+            descInput.value = description;
+            form.appendChild(descInput);
+            
+            document.body.appendChild(form);
+            form.submit();
+        })
+        .catch(err => {
+            alert('Error loading department: ' + err.message);
+        });
+}
+
+function deleteDepartment(id) {
+    if (confirm('Are you sure you want to delete this department? If it has employees, it will be deactivated instead.')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=departments';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_department';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editStakeholder(id) {
+    const code = prompt('Stakeholder Code:');
+    if (code === null) return;
+    const name = prompt('Full Name:');
+    if (name === null) return;
+    const type = prompt('Type (board_member/investor/partner/advisor/consultant/vendor/supplier/other):');
+    if (type === null) return;
+    const org = prompt('Organization (optional):', '') || '';
+    const email = prompt('Email (optional):', '') || '';
+    const phone = prompt('Phone (optional):', '') || '';
+    
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'hr.php?action=stakeholders';
+    
+    const csrfToken = document.querySelector('[name="csrf_token"]');
+    if (csrfToken) {
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = csrfToken.value;
+        form.appendChild(csrfInput);
+    }
+    
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = 'update_stakeholder';
+    form.appendChild(actionInput);
+    
+    const idInput = document.createElement('input');
+    idInput.type = 'hidden';
+    idInput.name = 'id';
+    idInput.value = id;
+    form.appendChild(idInput);
+    
+    ['stakeholder_code', 'full_name', 'stakeholder_type', 'organization', 'email', 'phone'].forEach(field => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = field;
+        input.value = {stakeholder_code: code, full_name: name, stakeholder_type: type, organization: org, email: email, phone: phone}[field] || '';
+        form.appendChild(input);
+    });
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function deleteStakeholder(id) {
+    if (confirm('Are you sure you want to delete this stakeholder? If it has communications, it will be deactivated instead.')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=stakeholders';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_stakeholder';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editAttendance(id) {
+    alert('Edit attendance functionality - to be implemented with proper modal');
+    // Similar pattern to other edit functions
+}
+
+function deleteAttendance(id) {
+    if (confirm('Are you sure you want to delete this attendance record?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=attendance';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_attendance';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editLeaveRequest(id) {
+    alert('Edit leave request functionality - to be implemented with proper modal');
+    // Similar pattern to other edit functions
+}
+
+function deleteLeaveRequest(id) {
+    if (confirm('Are you sure you want to delete this leave request? Only pending requests can be deleted.')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=leave';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_leave_request';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editPerformanceReview(id) {
+    alert('Edit performance review functionality - to be implemented with proper modal');
+    // Similar pattern to other edit functions
+}
+
+function deletePerformanceReview(id) {
+    if (confirm('Are you sure you want to delete this performance review?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=performance';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_performance_review';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editTraining(id) {
+    alert('Edit training functionality - to be implemented with proper modal');
+    // Similar pattern to other edit functions
+}
+
+function deleteTraining(id) {
+    if (confirm('Are you sure you want to delete this training record?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=training';
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_training';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function editStakeholderCommunication(id, stakeholderId) {
+    alert('Edit communication functionality - to be implemented with proper modal');
+    // Similar pattern to other edit functions
+}
+
+function deleteStakeholderCommunication(id, stakeholderId) {
+    if (confirm('Are you sure you want to delete this communication record?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'hr.php?action=stakeholders&view=' + stakeholderId;
+        
+        const csrfToken = document.querySelector('[name="csrf_token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.value;
+            form.appendChild(csrfInput);
+        }
+        
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'delete_stakeholder_communication';
+        form.appendChild(actionInput);
+        
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+        
+        const stakeholderInput = document.createElement('input');
+        stakeholderInput.type = 'hidden';
+        stakeholderInput.name = 'stakeholder_id';
+        stakeholderInput.value = stakeholderId;
+        form.appendChild(stakeholderInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
 </script>
 
 <?php require_once '../includes/footer.php'; ?>

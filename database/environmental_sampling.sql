@@ -1,0 +1,115 @@
+CREATE TABLE IF NOT EXISTS `env_sampling_projects` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `project_code` VARCHAR(40) NOT NULL,
+    `project_name` VARCHAR(150) DEFAULT NULL,
+    `client_id` INT DEFAULT NULL,
+    `field_report_id` INT DEFAULT NULL,
+    `site_name` VARCHAR(150) DEFAULT NULL,
+    `location_address` VARCHAR(255) DEFAULT NULL,
+    `latitude` DECIMAL(10, 6) DEFAULT NULL,
+    `longitude` DECIMAL(10, 6) DEFAULT NULL,
+    `sampling_type` ENUM('water', 'soil', 'air', 'geological', 'other') DEFAULT 'water',
+    `status` ENUM(
+        'draft',
+        'scheduled',
+        'in_progress',
+        'submitted',
+        'completed',
+        'archived'
+    ) DEFAULT 'draft',
+    `scheduled_date` DATE DEFAULT NULL,
+    `collected_date` DATE DEFAULT NULL,
+    `submitted_to_lab_at` DATETIME DEFAULT NULL,
+    `completed_at` DATETIME DEFAULT NULL,
+    `created_by` INT DEFAULT NULL,
+    `notes` TEXT DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uniq_project_code` (`project_code`),
+    KEY `idx_sampling_client` (`client_id`),
+    KEY `idx_sampling_status` (`status`),
+    CONSTRAINT `fk_sampling_client` FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE
+    SET NULL,
+        CONSTRAINT `fk_sampling_field_report` FOREIGN KEY (`field_report_id`) REFERENCES `field_reports`(`id`) ON DELETE
+    SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'Environmental sampling projects and work orders';
+CREATE TABLE IF NOT EXISTS `env_samples` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `project_id` INT NOT NULL,
+    `sample_code` VARCHAR(60) NOT NULL,
+    `sample_type` VARCHAR(80) DEFAULT NULL,
+    `matrix` ENUM(
+        'water',
+        'soil',
+        'air',
+        'rock',
+        'sediment',
+        'waste',
+        'other'
+    ) DEFAULT 'water',
+    `collection_method` VARCHAR(120) DEFAULT NULL,
+    `container_type` VARCHAR(120) DEFAULT NULL,
+    `preservative` VARCHAR(120) DEFAULT NULL,
+    `collected_by` VARCHAR(120) DEFAULT NULL,
+    `collected_at` DATETIME DEFAULT NULL,
+    `temperature_c` DECIMAL(5, 2) DEFAULT NULL,
+    `weather_notes` VARCHAR(255) DEFAULT NULL,
+    `field_observations` TEXT DEFAULT NULL,
+    `status` ENUM(
+        'pending',
+        'in_cooler',
+        'in_transit',
+        'at_lab',
+        'analyzed',
+        'disposed'
+    ) DEFAULT 'pending',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uniq_sample_code` (`sample_code`),
+    KEY `idx_samples_project` (`project_id`),
+    KEY `idx_samples_status` (`status`),
+    CONSTRAINT `fk_sample_project` FOREIGN KEY (`project_id`) REFERENCES `env_sampling_projects`(`id`) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'Individual environmental samples captured in the field';
+CREATE TABLE IF NOT EXISTS `env_sample_chain` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `sample_id` INT NOT NULL,
+    `custody_step` INT DEFAULT 1,
+    `handler_name` VARCHAR(120) NOT NULL,
+    `handler_role` VARCHAR(120) DEFAULT NULL,
+    `handler_signature` VARCHAR(150) DEFAULT NULL,
+    `transfer_action` ENUM(
+        'collected',
+        'sealed',
+        'transferred',
+        'received',
+        'stored',
+        'shipped',
+        'delivered',
+        'disposed'
+    ) DEFAULT 'collected',
+    `transfer_at` DATETIME NOT NULL,
+    `condition_notes` TEXT DEFAULT NULL,
+    `temperature_c` DECIMAL(5, 2) DEFAULT NULL,
+    `received_by_lab` TINYINT(1) DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY `idx_chain_sample` (`sample_id`, `custody_step`),
+    CONSTRAINT `fk_chain_sample` FOREIGN KEY (`sample_id`) REFERENCES `env_samples`(`id`) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'Chain-of-custody log for each sample';
+CREATE TABLE IF NOT EXISTS `env_lab_results` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `sample_id` INT NOT NULL,
+    `parameter_name` VARCHAR(150) NOT NULL,
+    `parameter_group` VARCHAR(120) DEFAULT NULL,
+    `parameter_unit` VARCHAR(40) DEFAULT NULL,
+    `result_value` DECIMAL(16, 6) DEFAULT NULL,
+    `detection_limit` DECIMAL(16, 6) DEFAULT NULL,
+    `method_reference` VARCHAR(120) DEFAULT NULL,
+    `analyst_name` VARCHAR(120) DEFAULT NULL,
+    `analyzed_at` DATETIME DEFAULT NULL,
+    `qa_qc_flag` ENUM('pass', 'review', 'fail', 'not_applicable') DEFAULT 'not_applicable',
+    `remarks` TEXT DEFAULT NULL,
+    `attachment_path` VARCHAR(255) DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY `idx_results_sample` (`sample_id`, `parameter_name`),
+    CONSTRAINT `fk_result_sample` FOREIGN KEY (`sample_id`) REFERENCES `env_samples`(`id`) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'Laboratory analytical results for samples';

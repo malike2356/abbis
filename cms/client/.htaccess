@@ -1,0 +1,5 @@
+# Redirect all old client portal URLs to new location
+RewriteEngine On
+RewriteBase /abbis3.2/
+RewriteRule ^(.*)$ ../../client-portal/$1 [R=301,L]
+

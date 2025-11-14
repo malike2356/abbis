@@ -8,8 +8,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
 // Ensure all required variables are set with defaults if missing
-$primaryColor = isset($themeConfig) && is_array($themeConfig) && isset($themeConfig['primary_color']) ? $themeConfig['primary_color'] : '#f39c12';
-$secondaryColor = isset($themeConfig) && is_array($themeConfig) && isset($themeConfig['secondary_color']) ? $themeConfig['secondary_color'] : '#34495e';
+$primaryColor = isset($themeConfig) && is_array($themeConfig) && isset($themeConfig['primary_color']) ? $themeConfig['primary_color'] : '#0ea5e9';
+$secondaryColor = isset($themeConfig) && is_array($themeConfig) && isset($themeConfig['secondary_color']) ? $themeConfig['secondary_color'] : '#0f2440';
 $baseUrl = isset($baseUrl) && $baseUrl ? $baseUrl : '/abbis3.2';
 $themeUrl = $baseUrl . '/cms/themes/construction';
 $siteTitle = isset($siteTitle) && $siteTitle ? $siteTitle : 'Our Company';
@@ -18,10 +18,13 @@ $homepage = isset($homepage) ? $homepage : null;
 $recentPosts = isset($recentPosts) && is_array($recentPosts) ? $recentPosts : [];
 $cmsSettings = isset($cmsSettings) && is_array($cmsSettings) ? $cmsSettings : [];
 
+if (!isset($rootPath)) {
+    $rootPath = dirname(dirname(dirname(__DIR__)));
+}
+
 // Ensure database connection and helper functions
 if (!isset($pdo)) {
     try {
-        $rootPath = dirname(dirname(dirname(__DIR__)));
         if (file_exists($rootPath . '/config/app.php')) {
             require_once $rootPath . '/config/app.php';
         }
@@ -62,6 +65,29 @@ if (empty($cmsSettings) && isset($pdo)) {
     }
 }
 
+$systemConfig = isset($systemConfig) && is_array($systemConfig) ? $systemConfig : [];
+if (empty($systemConfig) && isset($pdo)) {
+    try {
+        $configStmt = $pdo->query("SELECT config_key, config_value FROM system_config WHERE config_key IN ('company_name','company_logo','company_phone','company_email','company_tagline')");
+        while ($row = $configStmt->fetch(PDO::FETCH_ASSOC)) {
+            $systemConfig[$row['config_key']] = $row['config_value'];
+        }
+    } catch (Throwable $e) {
+        $systemConfig = [];
+    }
+}
+
+$contactPhone = trim($cmsSettings['contact_phone'] ?? ($systemConfig['company_phone'] ?? ''));
+$contactEmail = trim($cmsSettings['contact_email'] ?? ($systemConfig['company_email'] ?? ''));
+$callLink = $contactPhone ? 'tel:' . preg_replace('/\s+/', '', $contactPhone) : '';
+$whatsRaw = preg_replace('/\D+/', '', $cmsSettings['whatsapp_number'] ?? $contactPhone ?? '');
+$whatsLink = trim($cmsSettings['whatsapp_link'] ?? '');
+if (!$whatsLink && $whatsRaw) {
+    $normalizedWhats = ltrim($whatsRaw, '+');
+    $whatsLink = 'https://wa.me/' . $normalizedWhats;
+}
+$contactPageLink = $cmsSettings['contact_page_url'] ?? ($baseUrl . '/cms/contact');
+
 // Get services from catalog if not already set
 if (!isset($services) || !is_array($services)) {
     $services = [];
@@ -77,27 +103,29 @@ if (!isset($services) || !is_array($services)) {
     }
 }
 
+// Load hero banner helper
+require_once $rootPath . '/cms/includes/hero-banner-helper.php';
+
+// Check if hero should be displayed
+$currentPageType = getCurrentPageType();
+$shouldShowHero = shouldDisplayHeroBanner($cmsSettings, $currentPageType);
+
 // Hero banner settings
-$heroEnabled = isset($cmsSettings['hero_enabled']) ? $cmsSettings['hero_enabled'] : '1';
 $heroImage = isset($cmsSettings['hero_banner_image']) ? $cmsSettings['hero_banner_image'] : '';
 $heroTitle = isset($cmsSettings['hero_title']) ? $cmsSettings['hero_title'] : ($siteTitle ?: 'Welcome to Professional Borehole Services');
 $heroSubtitle = isset($cmsSettings['hero_subtitle']) ? $cmsSettings['hero_subtitle'] : ($siteTagline ?: 'Quality Water Well Drilling Services');
-$heroButton1Text = isset($cmsSettings['hero_button1_text']) ? $cmsSettings['hero_button1_text'] : 'Get Started';
-$heroButton1Link = isset($cmsSettings['hero_button1_link']) ? $cmsSettings['hero_button1_link'] : $baseUrl . '/cms/quote';
+$heroButton1Text = isset($cmsSettings['hero_button1_text']) ? $cmsSettings['hero_button1_text'] : 'Contact Us';
+$heroButton1Link = isset($cmsSettings['hero_button1_link']) ? $cmsSettings['hero_button1_link'] : $baseUrl . '/cms/contact';
 $heroButton2Text = isset($cmsSettings['hero_button2_text']) ? $cmsSettings['hero_button2_text'] : 'Our Services';
 $heroButton2Link = isset($cmsSettings['hero_button2_link']) ? $cmsSettings['hero_button2_link'] : $baseUrl . '/cms/services';
 $heroOverlay = isset($cmsSettings['hero_overlay_opacity']) ? $cmsSettings['hero_overlay_opacity'] : '0.5';
 $heroImageUrl = $heroImage ? ($baseUrl . '/' . $heroImage) : '';
+$heroBadge = trim($cmsSettings['hero_badge_text'] ?? ($siteTagline ?? 'Professional Borehole Drilling Services'));
+$heroBackgroundStyle = $heroImageUrl ? 'url(' . $heroImageUrl . ')' : 'linear-gradient(135deg, ' . $primaryColor . ', #2563eb)';
 
 // Header and footer paths - FIXED
 $headerPath = __DIR__ . '/../../public/header.php';
 $footerPath = __DIR__ . '/../../public/footer.php';
-if (!file_exists($headerPath)) {
-    $headerPath = dirname(dirname(__DIR__)) . '/public/header.php';
-}
-if (!file_exists($footerPath)) {
-    $footerPath = dirname(dirname(__DIR__)) . '/public/footer.php';
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -107,8 +135,7 @@ if (!file_exists($footerPath)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($siteTitle); ?> - <?php echo htmlspecialchars($siteTagline); ?></title>
     
-    <!-- Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Fonts - Using system fonts for consistency -->
     
     <!-- CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -130,7 +157,7 @@ if (!file_exists($footerPath)) {
         }
         
         body {
-            font-family: 'Poppins', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             line-height: 1.6;
             color: #333;
             overflow-x: hidden;
@@ -255,10 +282,10 @@ if (!file_exists($footerPath)) {
         }
         
         .btn-hero-primary:hover {
-            background: #e67e22;
+            background: #1d4ed8;
             color: white;
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            box-shadow: 0 5px 15px rgba(37, 99, 235, 0.35);
         }
         
         .btn-hero-outline {
@@ -340,7 +367,7 @@ if (!file_exists($footerPath)) {
         .service-icon-wrapper {
             width: 100%;
             height: 220px;
-            background: linear-gradient(135deg, var(--primary), #e67e22);
+            background: linear-gradient(135deg, var(--primary), #2563eb);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -394,7 +421,7 @@ if (!file_exists($footerPath)) {
         }
         
         .btn-service:hover {
-            background: #e67e22;
+            background: #1d4ed8;
             color: white;
             transform: translateY(-2px);
         }
@@ -487,22 +514,81 @@ if (!file_exists($footerPath)) {
     <?php endif; ?>
 
          <!-- Hero Section -->
-     <?php if ($heroEnabled): ?>
-     <section class="hero-section" style="background: <?php echo $heroImageUrl ? 'url(' . htmlspecialchars($heroImageUrl) . ')' : 'linear-gradient(135deg, ' . htmlspecialchars($primaryColor) . ', #e67e22)'; ?>; background-size: cover !important; background-repeat: no-repeat !important; background-position: center center !important;">
+     <?php if ($shouldShowHero): ?>
+     <section class="hero-section" style="background: <?php echo htmlspecialchars($heroBackgroundStyle); ?>; background-size: cover !important; background-repeat: no-repeat !important; background-position: center center !important;">
          <div class="hero-overlay"></div>
          <div class="container">
              <div class="hero-content">
-                 <span class="hero-badge">Professional Borehole Drilling Services</span>
+                 <?php if ($heroBadge): ?>
+                 <span class="hero-badge"><?php echo htmlspecialchars($heroBadge); ?></span>
+                 <?php endif; ?>
                  <h1><?php echo htmlspecialchars($heroTitle); ?></h1>
                  <p><?php echo htmlspecialchars($heroSubtitle); ?></p>
                  <div class="hero-buttons">
-                     <a href="<?php echo htmlspecialchars($heroButton1Link); ?>" class="btn-hero-primary"><?php echo htmlspecialchars($heroButton1Text); ?></a>
-                     <a href="<?php echo htmlspecialchars($heroButton2Link); ?>" class="btn-hero-outline"><?php echo htmlspecialchars($heroButton2Text); ?></a>
+                     <a href="<?php echo htmlspecialchars($heroButton1Link); ?>" class="btn-hero-primary">
+                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;margin-right:8px;"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.66 12.66 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.66 12.66 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"></path></svg>
+                         <?php echo htmlspecialchars($heroButton1Text); ?>
+                     </a>
+                     <a href="<?php echo htmlspecialchars($heroButton2Link); ?>" class="btn-hero-outline">
+                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;margin-right:8px;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"></path><path d="M14.06 4.94l3.75 3.75"></path></svg>
+                         <?php echo htmlspecialchars($heroButton2Text); ?>
+                     </a>
                  </div>
              </div>
          </div>
      </section>
      <?php endif; ?>
+
+    <?php if ($contactPhone || $contactEmail || $whatsLink): ?>
+    <section class="hero-contact-strip">
+        <div class="container">
+            <div class="contact-card">
+                <div class="contact-label">
+                    <span>Talk to a specialist</span>
+                    <span><?php echo htmlspecialchars($contactPhone ?: 'Request a callback'); ?></span>
+                </div>
+                <?php if ($contactEmail): ?>
+                <div class="contact-label">
+                    <span>Email</span>
+                    <span><?php echo htmlspecialchars($contactEmail); ?></span>
+                </div>
+                <?php endif; ?>
+                <div class="contact-actions">
+                    <?php if ($contactPhone && $callLink): ?>
+                    <a href="<?php echo htmlspecialchars($callLink); ?>" aria-label="Call <?php echo htmlspecialchars($siteTitle); ?>">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.66 12.66 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.66 12.66 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"></path></svg>
+                        Call us
+                    </a>
+                    <?php endif; ?>
+                    <?php if ($whatsLink): ?>
+                    <a href="<?php echo htmlspecialchars($whatsLink); ?>" target="_blank" rel="noopener" class="secondary" aria-label="Chat on WhatsApp">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-8.94 14.56L2 22l5.58-1.47A10 10 0 1 0 12 2Z"></path><path d="M16.24 16.24l-2.29-.65a1 1 0 0 0-.95.26l-.36.37a.52.52 0 0 1-.66.08 8.58 8.58 0 0 1-3.73-3.73.52.52 0 0 1 .08-.66l.37-.36a1 1 0 0 0 .26-.95L8.76 7.76a1 1 0 0 0-1-.58 2.6 2.6 0 0 0-1.71.91 2.68 2.68 0 0 0-.69 1.86 8.36 8.36 0 0 0 2.45 5.16 8.43 8.43 0 0 0 5.16 2.45 2.68 2.68 0 0 0 1.86-.69 2.6 2.6 0 0 0 .91-1.71 1 1 0 0 0-.5-1.03Z"></path></svg>
+                        WhatsApp
+                    </a>
+                    <?php endif; ?>
+                    <a href="<?php echo htmlspecialchars($contactPageLink); ?>" class="secondary" aria-label="Request a project estimate">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10a9 9 0 1 1-9-9"></path><polyline points="21 3 21 10 14 10"></polyline></svg>
+                        Request estimate
+                    </a>
+                </div>
+            </div>
+            <div class="trust-points">
+                <div class="trust-card">
+                    <strong>Nationwide crews</strong>
+                    <span>Teams stationed across all regions</span>
+                </div>
+                <div class="trust-card">
+                    <strong>24hr response</strong>
+                    <span>Rapid support for pump failures &amp; outages</span>
+                </div>
+                <div class="trust-card">
+                    <strong>Quality assured</strong>
+                    <span>ISO-aligned drilling &amp; water testing protocols</span>
+                </div>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
 
     <!-- About Section -->
     <section class="section" style="background: #f8f9fa;">
@@ -540,6 +626,44 @@ if (!file_exists($footerPath)) {
                 </div>
                 <div class="col-lg-6">
                     <img src="<?php echo $themeUrl; ?>/assets/images/about-image.jpg" class="img-fluid rounded" alt="About Us" style="box-shadow: 0 10px 30px rgba(0,0,0,0.1);" onerror="this.style.display='none'">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" style="background: white;">
+        <div class="container">
+            <div class="section-title">
+                <h2><span class="highlight">Integrated</span> Water Solutions</h2>
+                <div class="divider"></div>
+                <p style="max-width:780px;margin:12px auto 0;color:#475569;">
+                    From first site visit to pump commissioning, Kari Boreholes brings geologists, drilling crews, and automation specialists together under one project team.
+                </p>
+            </div>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>End-to-end delivery</h4>
+                    <ul>
+                        <li>Hydrogeology desktop studies &amp; groundwater modeling</li>
+                        <li>Environmental &amp; community engagement support</li>
+                        <li>Rig scheduling, logistics, and on-site quality control</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <h4>Smart water systems</h4>
+                    <ul>
+                        <li>Solar, hybrid, and diesel-powered pumping solutions</li>
+                        <li>Remote telemetry with ABBIS dashboards</li>
+                        <li>Water quality lab testing and treatment design</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <h4>Lifetime support</h4>
+                    <ul>
+                        <li>Preventive maintenance &amp; emergency repairs</li>
+                        <li>Parts inventory and OEM equipment sourcing</li>
+                        <li>Operator training and asset documentation</li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -634,7 +758,7 @@ if (!file_exists($footerPath)) {
                 <?php foreach (array_slice($recentPosts, 0, 3) as $post): ?>
                     <?php if (!is_array($post)) continue; ?>
                     <div class="service-card">
-                        <div class="service-icon-wrapper" style="background: linear-gradient(135deg, var(--primary), #e67e22);">
+                        <div class="service-icon-wrapper" style="background: linear-gradient(135deg, var(--primary), #2563eb);">
                             <i class="fas fa-newspaper"></i>
                         </div>
                         <div class="service-card-body">
@@ -654,6 +778,35 @@ if (!file_exists($footerPath)) {
         </div>
     </section>
     <?php endif; ?>
+
+    <section class="section" style="padding-top: 40px; padding-bottom: 80px; background: transparent;">
+        <div class="container">
+            <div class="cta-band">
+                <div>
+                    <h3>Ready to secure reliable water for your project?</h3>
+                    <p>Kari Boreholes &amp; Civil Engineering Works delivers dependable groundwater systems for estates, industries, farms, and communities across Ghana.</p>
+                </div>
+                <div class="cta-actions">
+                    <?php if ($contactPhone && $callLink): ?>
+                    <a href="<?php echo htmlspecialchars($callLink); ?>">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.09 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.66 12.66 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.66 12.66 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"></path></svg>
+                        Call now
+                    </a>
+                    <?php endif; ?>
+                    <a href="<?php echo htmlspecialchars($contactPageLink); ?>" class="secondary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                        Book a site visit
+                    </a>
+                    <?php if ($whatsLink): ?>
+                    <a href="<?php echo htmlspecialchars($whatsLink); ?>" target="_blank" rel="noopener" class="secondary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-8.94 14.56L2 22l5.58-1.47A10 10 0 1 0 12 2Z"></path><path d="M16.24 16.24l-2.29-.65a1 1 0 0 0-.95.26l-.36.37a.52.52 0 0 1-.66.08 8.58 8.58 0 0 1-3.73-3.73.52.52 0 0 1 .08-.66l.37-.36a1 1 0 0 0 .26-.95L8.76 7.76a1 1 0 0 0-1-.58 2.6 2.6 0 0 0-1.71.91 2.68 2.68 0 0 0-.69 1.86 8.36 8.36 0 0 0 2.45 5.16 8.43 8.43 0 0 0 5.16 2.45 2.68 2.68 0 0 0 1.86-.69 2.6 2.6 0 0 0 .91-1.71 1 1 0 0 0-.5-1.03Z"></path></svg>
+                        WhatsApp team
+                    </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- Footer -->
     <?php if (file_exists($footerPath)): ?>

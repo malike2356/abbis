@@ -59,12 +59,24 @@ if (!empty($query)) {
     
     // 3. Workers
     try {
-        $sql = "SELECT 'worker' as type, id, worker_name as title, created_at as date,
-                       role as subtitle, CONCAT('Worker: ', role, ' - ', COALESCE(contact_number, '')) as description,
-                       CONCAT('modules/config.php#workers') as url
+        $sql = "SELECT 
+                    'worker' as type, 
+                    id, 
+                    CONCAT_WS(' • ', NULLIF(employee_code, ''), worker_name) as title, 
+                    created_at as date,
+                    CONCAT_WS(' • ', NULLIF(role, ''), NULLIF(employee_code, '')) as subtitle, 
+                    CONCAT_WS(' • ',
+                        CONCAT('Staff ID: ', COALESCE(NULLIF(employee_code, ''), 'Pending assignment')),
+                        CONCAT('Role: ', COALESCE(NULLIF(role, ''), 'Unassigned')),
+                        CONCAT('Phone: ', COALESCE(NULLIF(contact_number, ''), 'N/A'))
+                    ) as description,
+                    CONCAT('modules/config.php#workers') as url
                 FROM workers 
-                WHERE worker_name LIKE ? OR role LIKE ? OR contact_number LIKE ?";
-        $params = ["%$query%", "%$query%", "%$query%"];
+                WHERE worker_name LIKE ? 
+                   OR role LIKE ? 
+                   OR contact_number LIKE ? 
+                   OR employee_code LIKE ?";
+        $params = ["%$query%", "%$query%", "%$query%", "%$query%"];
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $searchResults['workers'] = $stmt->fetchAll();

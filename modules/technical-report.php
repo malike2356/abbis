@@ -7,6 +7,7 @@ require_once '../config/app.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
+require_once '../includes/pos/PosRepository.php';
 
 $auth->requireAuth();
 
@@ -30,6 +31,17 @@ if (!$report) {
     die('Report not found');
 }
 
+$materialsStoreName = null;
+if (!empty($report['materials_store_id'])) {
+    try {
+        $posRepo = new PosRepository($pdo);
+        $store = $posRepo->fetchStoreById((int) $report['materials_store_id']);
+        $materialsStoreName = $store['store_name'] ?? null;
+    } catch (Throwable $e) {
+        $materialsStoreName = null;
+    }
+}
+
 // Get company config
 $config = [];
 $configStmt = $pdo->query("SELECT config_key, config_value FROM system_config");
@@ -49,7 +61,7 @@ $referenceId = $report['report_id'];
 
 // Generate QR code
 require_once '../includes/qr-code-generator.php';
-$technicalReportUrl = APP_URL . '/modules/technical-report.php?report_id=' . $reportId;
+$technicalReportUrl = app_url('modules/technical-report.php?report_id=' . $reportId);
 $qrCodePath = QRCodeGenerator::generate($technicalReportUrl, 'technical', 150);
 
 // Calculate duration from stored minutes (or calculate if not stored)
@@ -452,7 +464,15 @@ if ($report['total_duration']) {
                 <table>
                     <tr>
                         <td>Materials Provided By:</td>
-                        <td><?php echo ucfirst(str_replace('_', ' ', e($report['materials_provided_by'] ?? 'N/A'))); ?></td>
+                        <td>
+                            <?php
+                                $providerLabel = ucfirst(str_replace('_', ' ', e($report['materials_provided_by'] ?? 'N/A')));
+                                if (($report['materials_provided_by'] ?? '') === 'store' && $materialsStoreName) {
+                                    $providerLabel .= ' - ' . e($materialsStoreName);
+                                }
+                                echo $providerLabel;
+                            ?>
+                        </td>
                     </tr>
                     <tr>
                         <td>Screen Pipes Used:</td>

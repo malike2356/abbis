@@ -347,24 +347,53 @@ class ConfigManager {
     }
     
     public function deleteWorkerRole($id) {
-        // Check if role is used by workers
-        $stmt = $this->pdo->prepare("
-            SELECT wr.role_name, COUNT(w.id) as worker_count
-            FROM worker_roles wr
-            LEFT JOIN workers w ON w.role = wr.role_name
-            WHERE wr.id = ?
-            GROUP BY wr.id, wr.role_name
-        ");
+        // Get role name first
+        $stmt = $this->pdo->prepare("SELECT role_name FROM worker_roles WHERE id = ?");
         $stmt->execute([$id]);
-        $result = $stmt->fetch();
+        $role = $stmt->fetch();
         
-        if ($result && $result['worker_count'] > 0) {
-            return ['success' => false, 'message' => 'Cannot delete role that is assigned to workers'];
+        if (!$role) {
+            return ['success' => false, 'message' => 'Role not found'];
         }
         
+        $roleName = $role['role_name'];
+        
+        // Check if role is used by workers in old workers.role column
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) as worker_count
+            FROM workers 
+            WHERE role = ?
+        ");
+        $stmt->execute([$roleName]);
+        $oldCount = $stmt->fetch()['worker_count'];
+        
+        // Check if role is used in new worker_role_assignments table
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) as assignment_count
+            FROM worker_role_assignments 
+            WHERE role_name = ?
+        ");
+        $stmt->execute([$roleName]);
+        $newCount = $stmt->fetch()['assignment_count'];
+        
+        $totalCount = $oldCount + $newCount;
+        
+        if ($totalCount > 0) {
+            return [
+                'success' => false, 
+                'message' => "Cannot delete role '{$roleName}' because it is assigned to {$totalCount} worker(s). Please remove the role from all workers first."
+            ];
+        }
+        
+        // Delete the role
         $stmt = $this->pdo->prepare("DELETE FROM worker_roles WHERE id = ? AND is_system = 0");
         $stmt->execute([$id]);
-        return ['success' => true];
+        
+        if ($stmt->rowCount() > 0) {
+            return ['success' => true, 'message' => 'Role deleted successfully'];
+        } else {
+            return ['success' => false, 'message' => 'Cannot delete system role or role not found'];
+        }
     }
     
     public function toggleWorkerRole($id) {

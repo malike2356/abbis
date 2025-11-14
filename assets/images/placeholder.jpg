@@ -1,0 +1,16 @@
+<?php
+// Placeholder image generator
+header('Content-Type: image/jpeg');
+$width = isset($_GET['w']) ? (int)$_GET['w'] : 300;
+$height = isset($_GET['h']) ? (int)$_GET['h'] : 300;
+$img = imagecreatetruecolor($width, $height);
+$bg = imagecolorallocate($img, 241, 245, 249);
+$text = imagecolorallocate($img, 203, 213, 225);
+imagefill($img, 0, 0, $bg);
+$text = 'No Image';
+$font = 5;
+$x = ($width - imagefontwidth($font) * strlen($text)) / 2;
+$y = ($height - imagefontheight($font)) / 2;
+imagestring($img, $font, $x, $y, $text, $text);
+imagejpeg($img);
+imagedestroy($img);

@@ -10,8 +10,9 @@ require_once __DIR__ . '/../includes/MaintenanceExtractor.php';
 
 header('Content-Type: text/plain');
 
-$pdo = getDBConnection();
-$extractor = new MaintenanceExtractor($pdo);
+try {
+    $pdo = getDBConnection();
+    $extractor = new MaintenanceExtractor($pdo);
 
 echo "===========================================\n";
 echo "Maintenance Extraction Test\n";
@@ -84,4 +85,9 @@ if ($maintenanceData && isset($maintenanceData['is_maintenance'])) {
 echo "\n===========================================\n";
 echo "Test Complete!\n";
 echo "===========================================\n";
+} catch (Exception $e) {
+    echo "\n✗ ERROR: " . $e->getMessage() . "\n";
+    error_log("test-maintenance-extraction.php error: " . $e->getMessage());
+    exit(1);
+}
 

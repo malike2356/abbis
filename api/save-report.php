@@ -6,6 +6,10 @@ require_once '../includes/functions.php';
 require_once '../includes/validation.php';
 require_once '../includes/helpers.php';
 require_once '../includes/MaintenanceExtractor.php';
+require_once '../includes/AccountingAutoTracker.php';
+require_once '../includes/pos/FieldReportPosIntegrator.php';
+require_once '../includes/pos/FieldReportMaterialsService.php';
+require_once '../includes/pos/MaterialStoreService.php';
 
 $auth->requireAuth();
 
@@ -97,14 +101,47 @@ try {
     
     // Insert main report (with maintenance fields)
     // Check if maintenance columns exist, build query dynamically
+    $materialsStoreId = !empty($data['materials_store_id']) ? intval($data['materials_store_id']) : null;
+
+    // Calculate materials value (assets) - value of remaining materials
+    $materialsValue = 0;
+    $materialsProvidedBy = $data['materials_provided_by'] ?? 'client';
+    if (in_array($materialsProvidedBy, ['company_shop', 'company_store', 'company'])) {
+        // Get unit costs from materials_inventory
+        $materialsStmt = $pdo->query("SELECT material_type, unit_cost FROM materials_inventory");
+        $materials = $materialsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $unitCosts = [];
+        foreach ($materials as $mat) {
+            $unitCosts[$mat['material_type']] = floatval($mat['unit_cost'] ?? 0);
+        }
+        
+        // Calculate remaining materials
+        $screenPipesReceived = floatval($data['screen_pipes_received'] ?? 0);
+        $screenPipesUsed = floatval($data['screen_pipes_used'] ?? 0);
+        $plainPipesReceived = floatval($data['plain_pipes_received'] ?? 0);
+        $plainPipesUsed = floatval($data['plain_pipes_used'] ?? 0);
+        $gravelReceived = floatval($data['gravel_received'] ?? 0);
+        $gravelUsed = floatval($data['gravel_used'] ?? 0);
+        
+        $screenPipesRemaining = max(0, $screenPipesReceived - $screenPipesUsed);
+        $plainPipesRemaining = max(0, $plainPipesReceived - $plainPipesUsed);
+        $gravelRemaining = max(0, $gravelReceived - $gravelUsed);
+        
+        // Calculate total value of remaining materials (assets)
+        $materialsValue = 
+            ($screenPipesRemaining * ($unitCosts['screen_pipe'] ?? 0)) +
+            ($plainPipesRemaining * ($unitCosts['plain_pipe'] ?? 0)) +
+            ($gravelRemaining * ($unitCosts['gravel'] ?? 0));
+    }
+    
     $columns = [
         'report_id', 'report_date', 'rig_id', 'job_type', 'site_name', 'plus_code', 'latitude', 'longitude',
         'location_description', 'region', 'client_id', 'client_contact', 'start_time', 'finish_time',
         'total_duration', 'start_rpm', 'finish_rpm', 'total_rpm', 'rod_length', 'rods_used', 'total_depth',
-        'screen_pipes_used', 'plain_pipes_used', 'gravel_used', 'construction_depth', 'materials_provided_by',
+        'screen_pipes_used', 'plain_pipes_used', 'gravel_used', 'construction_depth', 'materials_provided_by', 'materials_store_id',
         'supervisor', 'total_workers', 'remarks', 'incident_log', 'solution_log', 'recommendation_log',
         'balance_bf', 'contract_sum', 'rig_fee_charged', 'rig_fee_collected', 'cash_received', 'materials_income',
-        'materials_cost', 'momo_transfer', 'cash_given', 'bank_deposit', 'total_income', 'total_expenses',
+        'materials_cost', 'materials_value', 'momo_transfer', 'cash_given', 'bank_deposit', 'total_income', 'total_expenses',
         'total_wages', 'net_profit', 'total_money_banked', 'days_balance', 'outstanding_rig_fee', 'created_by'
     ];
     $values = [
@@ -114,11 +151,12 @@ try {
         $data['finish_time'], $data['total_duration'], $data['start_rpm'], $data['finish_rpm'],
         $data['total_rpm'], $data['rod_length'], $data['rods_used'], $data['total_depth'],
         $data['screen_pipes_used'] ?? 0, $data['plain_pipes_used'] ?? 0, $data['gravel_used'] ?? 0,
-        $constructionDepth, $data['materials_provided_by'] ?? 'client', $supervisorText,
+        $constructionDepth, $data['materials_provided_by'] ?? 'client', $materialsStoreId,
+        $supervisorText,
         $data['total_workers'] ?? 0, $data['remarks'] ?? '', $data['incident_log'] ?? '', $data['solution_log'] ?? '',
         $data['recommendation_log'] ?? '', $data['balance_bf'] ?? 0, $data['contract_sum'] ?? 0,
         $data['rig_fee_charged'] ?? 0, $data['rig_fee_collected'] ?? 0, $data['cash_received'] ?? 0,
-        $data['materials_income'] ?? 0, $data['materials_cost'] ?? 0, $data['momo_transfer'] ?? 0,
+        $data['materials_income'] ?? 0, $data['materials_cost'] ?? 0, $materialsValue, $data['momo_transfer'] ?? 0,
         $data['cash_given'] ?? 0, $data['bank_deposit'] ?? 0, $totals['total_income'], $totals['total_expenses'],
         $totals['total_wages'], $totals['net_profit'], $totals['total_money_banked'], $totals['days_balance'],
         $totals['outstanding_rig_fee'], $_SESSION['user_id']
@@ -131,6 +169,30 @@ try {
         $values[] = $supervisorId;
     } catch (PDOException $e) {
         // Column doesn't exist yet, will be added by migration
+    }
+    
+    // Check if materials_value column exists, handle dynamically
+    $hasMaterialsValueColumn = false;
+    try {
+        $pdo->query("SELECT materials_value FROM field_reports LIMIT 1");
+        $hasMaterialsValueColumn = true;
+    } catch (PDOException $e) {
+        // Column doesn't exist, remove from columns/values
+        $materialsValueIndex = array_search('materials_value', $columns);
+        if ($materialsValueIndex !== false) {
+            // Find materials_cost index to locate materials_value value
+            $materialsCostIndex = array_search('materials_cost', $columns);
+            if ($materialsCostIndex !== false) {
+                // materials_value comes right after materials_cost
+                $valueIndex = $materialsCostIndex + 1;
+                if (isset($values[$valueIndex])) {
+                    unset($values[$valueIndex]);
+                }
+            }
+            unset($columns[$materialsValueIndex]);
+            $columns = array_values($columns); // Re-index
+            $values = array_values($values); // Re-index
+        }
     }
     
     // Add maintenance columns if they exist
@@ -346,20 +408,154 @@ try {
         }
     }
     
-    // Update materials inventory if company provided materials
+    // Update materials inventory if company provided materials (legacy 'company' value)
+    // Note: New values are 'company_shop' and 'company_store'
     if (($data['materials_provided_by'] ?? '') === 'company') {
         $screenPipesUsed = intval($data['screen_pipes_used'] ?? 0);
         $plainPipesUsed = intval($data['plain_pipes_used'] ?? 0);
         $gravelUsed = intval($data['gravel_used'] ?? 0);
         
-        if ($screenPipesUsed > 0) {
-            $abbis->updateMaterialsInventory('screen_pipe', $screenPipesUsed, $reportInsertId);
+        // OLD CODE - Replaced by FieldReportMaterialsService below
+        // Keeping for backward compatibility but new service handles everything
+    }
+
+    // Process materials with system-wide sync (NEW COMPREHENSIVE SYSTEM)
+    try {
+        $materialsService = new FieldReportMaterialsService($pdo);
+        $materialsResult = $materialsService->processFieldReportMaterials($reportInsertId, $data);
+        
+        if (!$materialsResult['success']) {
+            error_log("Field report materials processing failed: " . ($materialsResult['error'] ?? 'Unknown error'));
+        } else {
+            // Update materials_cost based on processing result
+            // Only include cost if materials are for company (not contractor's own materials)
+            $jobType = $data['job_type'] ?? 'direct';
+            $materialsProvidedBy = $data['materials_provided_by'] ?? 'client';
+            $includeInCost = true;
+            
+            // Rule: If contractor job AND materials provided by client → NOT in cost
+            // Company materials (shop or store) are always included in cost
+            if ($jobType === 'subcontract' && $materialsProvidedBy === 'client') {
+                $includeInCost = false;
+            }
+            
+            // Both company_shop and company_store are company materials
+            if (in_array($materialsProvidedBy, ['company_shop', 'company_store'])) {
+                $includeInCost = true;
+            }
+            
+            if ($includeInCost && isset($materialsResult['results']['used'])) {
+                $totalMaterialsCost = 0;
+                foreach ($materialsResult['results']['used'] as $material => $result) {
+                    if ($result['include_in_cost'] ?? false) {
+                        $totalMaterialsCost += $result['cost'] ?? 0;
+                    }
+                }
+                
+                // Update field report with calculated materials cost
+                if ($totalMaterialsCost > 0) {
+                    try {
+                        $updateCostStmt = $pdo->prepare("
+                            UPDATE field_reports 
+                            SET materials_cost = ?
+                            WHERE id = ?
+                        ");
+                        $updateCostStmt->execute([$totalMaterialsCost, $reportInsertId]);
+                        
+                        // Recalculate totals with updated materials cost
+                        $data['materials_cost'] = $totalMaterialsCost;
+                        $totals = $abbis->calculateFinancialTotals($data);
+                        
+                        // Update financial totals
+                        $updateTotalsStmt = $pdo->prepare("
+                            UPDATE field_reports 
+                            SET total_expenses = ?,
+                                net_profit = ?
+                            WHERE id = ?
+                        ");
+                        $updateTotalsStmt->execute([
+                            $totals['total_expenses'],
+                            $totals['net_profit'],
+                            $reportInsertId
+                        ]);
+                    } catch (PDOException $e) {
+                        error_log("Error updating materials cost: " . $e->getMessage());
+                    }
+                }
+            }
         }
-        if ($plainPipesUsed > 0) {
-            $abbis->updateMaterialsInventory('plain_pipe', $plainPipesUsed, $reportInsertId);
+    } catch (Exception $e) {
+        error_log("Error processing field report materials: " . $e->getMessage());
+        error_log("Stack trace: " . $e->getTraceAsString());
+        // Don't fail the report save if materials processing fails
+    }
+    
+    // Material Store Integration - Process materials from Material Store (Company Store/Warehouse)
+    // Handle both 'store' (legacy) and 'company_store' (new) values
+    $materialsProvidedBy = $data['materials_provided_by'] ?? '';
+    if ($materialsProvidedBy === 'store' || $materialsProvidedBy === 'company_store') {
+        try {
+            $materialStoreService = new MaterialStoreService($pdo);
+            $materialsUsed = [
+                'screen_pipes_used' => intval($data['screen_pipes_used'] ?? 0),
+                'plain_pipes_used' => intval($data['plain_pipes_used'] ?? 0),
+                'gravel_used' => intval($data['gravel_used'] ?? 0)
+            ];
+            
+            $storeResult = $materialStoreService->useInFieldWork(
+                $reportInsertId,
+                $materialsUsed,
+                $_SESSION['user_id'] ?? 0
+            );
+            
+            if ($storeResult['success']) {
+                // Update field report with remaining quantities and value
+                $updateRemainingStmt = $pdo->prepare("
+                    UPDATE field_reports 
+                    SET screen_pipes_remaining = ?,
+                        plain_pipes_remaining = ?,
+                        gravel_remaining = ?,
+                        materials_value_used = ?
+                    WHERE id = ?
+                ");
+                $updateRemainingStmt->execute([
+                    $storeResult['materials']['screen_pipe']['remaining'] ?? null,
+                    $storeResult['materials']['plain_pipe']['remaining'] ?? null,
+                    $storeResult['materials']['gravel']['remaining'] ?? null,
+                    $storeResult['total_value'] ?? 0,
+                    $reportInsertId
+                ]);
+                
+                error_log("[Field Report] Material Store inventory updated for report {$reportId}");
+            } else {
+                error_log("[Field Report] Material Store processing failed: " . ($storeResult['error'] ?? 'Unknown'));
+            }
+        } catch (Exception $e) {
+            error_log("[Field Report] Material Store error: " . $e->getMessage());
+            // Don't fail the report save if Material Store processing fails
         }
-        if ($gravelUsed > 0) {
-            $abbis->updateMaterialsInventory('gravel', $gravelUsed, $reportInsertId);
+    }
+    
+    // POS integration for Company (Shop/POS) - materials directly from POS
+    // Handle both 'material_shop' (legacy), 'company_shop' (new), and 'store' with store_id
+    if (($materialsProvidedBy === 'material_shop' || $materialsProvidedBy === 'company_shop' || 
+         ($materialsProvidedBy === 'store' && $materialsStoreId)) && $materialsStoreId) {
+        try {
+            FieldReportPosIntegrator::syncInventory(
+                $pdo,
+                [
+                    'report_db_id' => $reportInsertId,
+                    'report_code' => $reportId,
+                    'store_id' => $materialsStoreId,
+                    'screen_pipes_used' => (int) ($data['screen_pipes_used'] ?? 0),
+                    'plain_pipes_used' => (int) ($data['plain_pipes_used'] ?? 0),
+                    'gravel_used' => (int) ($data['gravel_used'] ?? 0),
+                    'materials_provided_by' => 'store',
+                    'performed_by' => $_SESSION['user_id'] ?? null,
+                ]
+            );
+        } catch (Exception $e) {
+            error_log("Legacy POS sync failed (non-fatal): " . $e->getMessage());
         }
     }
     
@@ -556,6 +752,79 @@ try {
     }
     
     $pdo->commit();
+    
+    // Automatically track financial transactions in accounting system
+    // This runs automatically for EVERY new field report - no manual intervention needed
+    try {
+        // Ensure accounting tables exist before tracking
+        try {
+            $pdo->query("SELECT 1 FROM chart_of_accounts LIMIT 1");
+        } catch (PDOException $e) {
+            // Tables don't exist, initialize them
+            $migrationFile = __DIR__ . '/../database/accounting_migration.sql';
+            if (file_exists($migrationFile)) {
+                $sql = file_get_contents($migrationFile);
+                if ($sql) {
+                    $stmts = array_filter(array_map('trim', preg_split('/;\s*\n/', $sql)));
+                    foreach ($stmts as $stmt) {
+                        if ($stmt !== '') {
+                            try {
+                                $pdo->exec($stmt);
+                            } catch (PDOException $e2) {
+                                // Ignore if already exists
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        $accountingTracker = new AccountingAutoTracker($pdo);
+        
+        // Get client name for description
+        $clientName = '';
+        if ($clientId) {
+            $clientStmt = $pdo->prepare("SELECT client_name FROM clients WHERE id = ?");
+            $clientStmt->execute([$clientId]);
+            $client = $clientStmt->fetch();
+            $clientName = $client ? $client['client_name'] : '';
+        }
+        
+        // Prepare report data for accounting tracking
+        $reportDataForAccounting = array_merge($data, [
+            'report_id' => $reportId,
+            'report_date' => $data['report_date'],
+            'site_name' => $data['site_name'] ?? '',
+            'client_name' => $clientName,
+            'created_by' => $_SESSION['user_id'],
+            'contract_sum' => $data['contract_sum'] ?? 0,
+            'rig_fee_charged' => $data['rig_fee_charged'] ?? 0,
+            'rig_fee_collected' => $data['rig_fee_collected'] ?? 0,
+            'cash_received' => $data['cash_received'] ?? 0,
+            'materials_income' => $data['materials_income'] ?? 0,
+            'materials_cost' => $data['materials_cost'] ?? 0,
+            'momo_transfer' => $data['momo_transfer'] ?? 0,
+            'cash_given' => $data['cash_given'] ?? 0,
+            'bank_deposit' => $data['bank_deposit'] ?? 0,
+            'total_wages' => $totals['total_wages'],
+            'total_expenses' => $totals['total_expenses'],
+            'outstanding_rig_fee' => $totals['outstanding_rig_fee']
+        ]);
+        
+        // Automatically create journal entry - this happens for EVERY new report
+        $trackingResult = $accountingTracker->trackFieldReport($reportInsertId, $reportDataForAccounting);
+        
+        if ($trackingResult) {
+            error_log("Accounting: Auto-tracked field report {$reportId} (ID: {$reportInsertId})");
+        } else {
+            error_log("Accounting: Failed to auto-track field report {$reportId} (ID: {$reportInsertId}) - check for errors above");
+        }
+    } catch (Exception $e) {
+        // Log but don't fail the report save if accounting tracking fails
+        // This ensures reports are always saved even if accounting has issues
+        error_log("Accounting auto-tracking error for report {$reportId}: " . $e->getMessage());
+        error_log("Stack trace: " . $e->getTraceAsString());
+    }
     
     // Queue email notification
     try {

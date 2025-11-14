@@ -9,7 +9,8 @@ require_once __DIR__ . '/../config/database.php';
 
 header('Content-Type: application/json');
 
-$pdo = getDBConnection();
+try {
+    $pdo = getDBConnection();
 
 $startRpm = isset($_POST['start_rpm']) ? floatval($_POST['start_rpm']) : null;
 $finishRpm = isset($_POST['finish_rpm']) ? floatval($_POST['finish_rpm']) : null;
@@ -89,4 +90,13 @@ if (!empty($errors)) {
 }
 
 echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        'valid' => false,
+        'errors' => ['System error: ' . $e->getMessage()],
+        'warnings' => []
+    ]);
+    error_log("validate-rpm.php error: " . $e->getMessage());
+}
 

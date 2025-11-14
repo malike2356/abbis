@@ -11,6 +11,7 @@ require_once '../includes/auth.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('finance.access');
 
 require_once '../includes/header.php';
 ?>
@@ -20,134 +21,18 @@ require_once '../includes/header.php';
         <h1>💰 Financial Management</h1>
         <p>Central hub for all financial operations and transactions</p>
     </div>
-    
-    <!-- Financial Management Grid -->
-    <div class="dashboard-grid">
-        <!-- Finance Overview -->
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">📊</span>
-                <div>
-                    <h2 style="margin: 0;">Finance Overview</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
-                        Financial reports, transactions, and analytics
-                    </p>
-                </div>
-            </div>
-            <a href="finance.php" class="btn btn-primary" style="width: 100%;">
-                Open Finance →
-            </a>
-        </div>
-        
-        <!-- Payroll -->
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">💵</span>
-                <div>
-                    <h2 style="margin: 0;">Payroll</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
-                        Worker payments and payroll management
-                    </p>
-                </div>
-            </div>
-            <a href="payroll.php" class="btn btn-primary" style="width: 100%;">
-                Open Payroll →
-            </a>
-        </div>
-        
-        <!-- Loans -->
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">💳</span>
-                <div>
-                    <h2 style="margin: 0;">Loans</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
-                        Worker loans and debt management
-                    </p>
-                </div>
-            </div>
-            <a href="loans.php" class="btn btn-primary" style="width: 100%;">
-                Open Loans →
-            </a>
-        </div>
-
-        <!-- Accounting -->
-        <?php if (function_exists('isFeatureEnabled') ? isFeatureEnabled('accounting') : true): ?>
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">📘</span>
-                <div>
-                    <h2 style="margin: 0;">Accounting</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
-                        General accounting (double-entry), reports, integrations
-                    </p>
-                </div>
-            </div>
-            <a href="accounting.php" class="btn btn-primary" style="width: 100%;">
-                Open Accounting →
-            </a>
-        </div>
-        <?php endif; ?>
-        
-        <!-- Collections Assistant -->
-        <?php if (function_exists('isFeatureEnabled') ? isFeatureEnabled('collections') : true): ?>
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">📅</span>
-                <div>
-                    <h2 style="margin: 0;">Collections Assistant</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">Predict late payers; schedule smart reminders</p>
-                </div>
-            </div>
-            <a href="collections.php" class="btn btn-primary" style="width: 100%;">Open Collections →</a>
-        </div>
-        <?php endif; ?>
-        
-        <!-- Debt Recovery -->
-        <div class="dashboard-card">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 32px;">🔍</span>
-                <div>
-                    <h2 style="margin: 0;">Debt Recovery</h2>
-                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">Track and recover unpaid contract amounts</p>
-                </div>
-            </div>
-            <?php
-            $pdo = getDBConnection();
-            try {
-                $debtCount = $pdo->query("SELECT COUNT(*) FROM debt_recoveries WHERE status IN ('outstanding', 'partially_paid', 'in_collection')")->fetchColumn() ?: 0;
-                $debtAmount = $pdo->query("SELECT COALESCE(SUM(remaining_debt), 0) FROM debt_recoveries WHERE status IN ('outstanding', 'partially_paid', 'in_collection')")->fetchColumn() ?: 0;
-            } catch (PDOException $e) {
-                $debtCount = 0;
-                $debtAmount = 0;
-            }
-            ?>
-            <?php if ($debtCount > 0): ?>
-                <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-                    <div style="font-size: 14px; color: var(--danger); font-weight: 600; margin-bottom: 4px;">
-                        ⚠️ <?php echo number_format($debtCount); ?> Outstanding Debt<?php echo $debtCount > 1 ? 's' : ''; ?>
-                    </div>
-                    <div style="font-size: 13px; color: var(--text);">
-                        Total: GHS <?php echo number_format($debtAmount, 2); ?>
-                    </div>
-                </div>
-            <?php endif; ?>
-            <a href="debt-recovery.php" class="btn btn-primary" style="width: 100%;">Open Debt Recovery →</a>
-        </div>
-    </div>
-    
     <!-- Quick Financial Stats -->
-    <div class="dashboard-card" id="quick-financial-overview" style="margin-top: 30px;">
+    <div class="dashboard-card" id="quick-financial-overview" style="margin-bottom: 32px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <h2 style="margin: 0;">📈 Quick Financial Overview</h2>
             <div class="export-buttons" style="display: flex; gap: 6px;">
-                <a href="export.php?module=reports&format=csv" class="btn btn-sm btn-outline" title="Export Financial Data as CSV">
+                <a href="<?php echo api_url('export.php', ['module' => 'reports', 'format' => 'csv']); ?>" class="btn btn-sm btn-outline" title="Export Financial Data as CSV">
                     📥 CSV
                 </a>
-                <a href="export.php?module=reports&format=excel" class="btn btn-sm btn-outline" title="Export Financial Data as Excel">
+                <a href="<?php echo api_url('export.php', ['module' => 'reports', 'format' => 'excel']); ?>" class="btn btn-sm btn-outline" title="Export Financial Data as Excel">
                     📊 Excel
                 </a>
-                <a href="export.php?module=reports&format=pdf" class="btn btn-sm btn-outline" title="Export Financial Data as PDF" target="_blank">
+                <a href="<?php echo api_url('export.php', ['module' => 'reports', 'format' => 'pdf']); ?>" class="btn btn-sm btn-outline" title="Export Financial Data as PDF" target="_blank">
                     📄 PDF
                 </a>
             </div>
@@ -172,12 +57,22 @@ require_once '../includes/header.php';
                 $stmt = $pdo->query("SELECT COALESCE(SUM(total_wages), 0) as total FROM field_reports");
                 $totalPayroll = $stmt->fetch()['total'];
                 
-                // Total Loans
-                $stmt = $pdo->query("SELECT COALESCE(SUM(loan_amount), 0) as total FROM rig_fee_debts WHERE status = 'outstanding'");
+                // Total Loans (worker loans outstanding)
+                $stmt = $pdo->query("
+                    SELECT COALESCE(SUM(outstanding_balance), 0) as total 
+                    FROM loans 
+                    WHERE status <> 'repaid'
+                      AND outstanding_balance > 0
+                ");
                 $totalLoans = $stmt->fetch()['total'] ?? 0;
                 
                 // Outstanding Loans Count
-                $stmt = $pdo->query("SELECT COUNT(*) as count FROM rig_fee_debts WHERE status = 'outstanding'");
+                $stmt = $pdo->query("
+                    SELECT COUNT(*) as count 
+                    FROM loans 
+                    WHERE status <> 'repaid'
+                      AND outstanding_balance > 0
+                ");
                 $loansCount = $stmt->fetch()['count'] ?? 0;
                 
                 // Outstanding Debt Recovery
@@ -330,6 +225,121 @@ require_once '../includes/header.php';
                 echo '<p style="color: var(--danger);">Error loading rig breakdown: ' . htmlspecialchars($e->getMessage()) . '</p>';
             }
             ?>
+        </div>
+    </div>
+    
+    <!-- Financial Management Grid -->
+    <div class="dashboard-grid">
+        <!-- Finance Overview -->
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">📊</span>
+                <div>
+                    <h2 style="margin: 0;">Finance Overview</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
+                        Financial reports, transactions, and analytics
+                    </p>
+                </div>
+            </div>
+            <a href="finance.php" class="btn btn-primary" style="width: 100%;">
+                Open Finance →
+            </a>
+        </div>
+        
+        <!-- Payroll -->
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">💵</span>
+                <div>
+                    <h2 style="margin: 0;">Payroll</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
+                        Worker payments and payroll management
+                    </p>
+                </div>
+            </div>
+            <a href="payroll.php" class="btn btn-primary" style="width: 100%;">
+                Open Payroll →
+            </a>
+        </div>
+        
+        <!-- Loans -->
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">💳</span>
+                <div>
+                    <h2 style="margin: 0;">Loans</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
+                        Worker loans and debt management
+                    </p>
+                </div>
+            </div>
+            <a href="loans.php" class="btn btn-primary" style="width: 100%;">
+                Open Loans →
+            </a>
+        </div>
+
+        <!-- Accounting -->
+        <?php if (function_exists('isFeatureEnabled') ? isFeatureEnabled('accounting') : true): ?>
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">📘</span>
+                <div>
+                    <h2 style="margin: 0;">Accounting</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">
+                        General accounting (double-entry), reports, integrations
+                    </p>
+                </div>
+            </div>
+            <a href="accounting.php" class="btn btn-primary" style="width: 100%;">
+                Open Accounting →
+            </a>
+        </div>
+        <?php endif; ?>
+        
+        <!-- Collections Assistant -->
+        <?php if (function_exists('isFeatureEnabled') ? isFeatureEnabled('collections') : true): ?>
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">📅</span>
+                <div>
+                    <h2 style="margin: 0;">Collections Assistant</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">Predict late payers; schedule smart reminders</p>
+                </div>
+            </div>
+            <a href="collections.php" class="btn btn-primary" style="width: 100%;">Open Collections →</a>
+        </div>
+        <?php endif; ?>
+        
+        <!-- Debt Recovery -->
+        <div class="dashboard-card">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <span style="font-size: 32px;">🔍</span>
+                <div>
+                    <h2 style="margin: 0;">Debt Recovery</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 14px;">Track and recover unpaid contract amounts</p>
+                </div>
+            </div>
+            <?php
+            $pdo = getDBConnection();
+            try {
+                $debtCount = $pdo->query("SELECT COUNT(*) FROM debt_recoveries WHERE status IN ('outstanding', 'partially_paid', 'in_collection')")->fetchColumn() ?: 0;
+                $debtAmount = $pdo->query("SELECT COALESCE(SUM(remaining_debt), 0) FROM debt_recoveries WHERE status IN ('outstanding', 'partially_paid', 'in_collection')")->fetchColumn() ?: 0;
+            } catch (PDOException $e) {
+                $debtCount = 0;
+                $debtAmount = 0;
+            }
+            ?>
+            <?php if ($debtCount > 0): ?>
+                <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 14px; color: var(--danger); font-weight: 600; margin-bottom: 4px;">
+                        ⚠️ <?php echo number_format($debtCount); ?> Outstanding Debt<?php echo $debtCount > 1 ? 's' : ''; ?>
+                    </div>
+                    <div style="font-size: 13px; color: var(--text);">
+                        Total: GHS <?php echo number_format($debtAmount, 2); ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <a href="debt-recovery.php" class="btn btn-primary" style="width: 100%;">Open Debt Recovery →</a>
         </div>
     </div>
 </div>

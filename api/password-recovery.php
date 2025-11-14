@@ -69,19 +69,54 @@ function handlePasswordResetRequest() {
         return;
     }
     
+    // Ensure password_reset_tokens table exists
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id INT(11) NOT NULL AUTO_INCREMENT,
+                user_id INT(11) NOT NULL,
+                token VARCHAR(255) NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used TINYINT(1) DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY token (token),
+                KEY user_id (user_id),
+                KEY expires_at (expires_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (PDOException $e) {
+        // Table might already exist, continue
+        error_log("Password reset table creation: " . $e->getMessage());
+    }
+    
     // Generate secure token
     $token = bin2hex(random_bytes(32));
     $expiresAt = date('Y-m-d H:i:s', time() + 3600); // 1 hour
     
+    // Clean up old unused tokens for this user
+    try {
+        $pdo->prepare("DELETE FROM password_reset_tokens WHERE user_id = ? AND expires_at < NOW()")->execute([$user['id']]);
+    } catch (PDOException $e) {
+        // Ignore cleanup errors
+        error_log("Password reset token cleanup: " . $e->getMessage());
+    }
+    
     // Save token
-    $stmt = $pdo->prepare("
-        INSERT INTO password_reset_tokens (user_id, token, expires_at)
-        VALUES (?, ?, ?)
-    ");
-    $stmt->execute([$user['id'], $token, $expiresAt]);
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO password_reset_tokens (user_id, token, expires_at)
+            VALUES (?, ?, ?)
+        ");
+        $stmt->execute([$user['id'], $token, $expiresAt]);
+    } catch (PDOException $e) {
+        error_log("Password reset token save error: " . $e->getMessage());
+        jsonResponse(['success' => false, 'message' => 'Failed to create reset token'], 500);
+        return;
+    }
     
     // Generate reset link
-    $resetLink = APP_URL . '/reset-password.php?token=' . $token;
+    $resetLink = app_url('reset-password.php?token=' . $token);
     
     // Send email
     $subject = 'Password Reset Request - ABBIS';

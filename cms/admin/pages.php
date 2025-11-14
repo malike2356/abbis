@@ -94,6 +94,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: pages.php');
         exit;
     }
+    if (isset($_GET['action']) && $_GET['action'] === 'clone' && $id) {
+        // Clone page
+        $stmt = $pdo->prepare("SELECT * FROM cms_pages WHERE id=?");
+        $stmt->execute([$id]);
+        $original = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($original) {
+            // Generate new slug
+            $newSlug = $original['slug'] . '-copy-' . time();
+            $newTitle = $original['title'] . ' (Copy)';
+            
+            // Ensure slug uniqueness
+            $baseSlug = $newSlug;
+            $counter = 1;
+            while (true) {
+                $checkStmt = $pdo->prepare("SELECT id FROM cms_pages WHERE slug=? LIMIT 1");
+                $checkStmt->execute([$newSlug]);
+                if (!$checkStmt->fetch()) {
+                    break;
+                }
+                $newSlug = $baseSlug . '-' . $counter;
+                $counter++;
+            }
+            
+            // Create clone
+            $stmt = $pdo->prepare("INSERT INTO cms_pages (title, slug, content, status, seo_title, seo_description, created_by) VALUES (?,?,?,?,?,?,?)");
+            $stmt->execute([
+                $newTitle,
+                $newSlug,
+                $original['content'],
+                'draft', // Always clone as draft
+                $original['seo_title'],
+                $original['seo_description'],
+                $_SESSION['cms_user_id'] ?? 1
+            ]);
+            
+            $newId = $pdo->lastInsertId();
+            header('Location: pages.php?action=edit&id=' . $newId);
+            exit;
+        }
+    }
 }
 
 $page = null;
@@ -255,11 +296,7 @@ if (!$homepageExists) {
 // Get company name
 $configStmt = $pdo->query("SELECT config_value FROM system_config WHERE config_key='company_name'");
 $companyName = $configStmt->fetchColumn() ?: 'CMS Admin';
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_url();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -509,117 +546,261 @@ if (defined('APP_URL')) {
     <?php include 'footer.php'; ?>
     
     <div class="wrap">
-        <h1><?php echo $action === 'edit' ? 'Edit Page' : ($action === 'add' ? 'Add New Page' : 'Pages'); ?></h1>
+        <!-- Page Header -->
+        <div class="admin-page-header">
+            <h1><?php echo $action === 'edit' ? '✏️ Edit Page' : ($action === 'add' ? '➕ Add New Page' : '📄 Pages Management'); ?></h1>
+            <p>
+                <?php if ($action === 'edit' || $action === 'add'): ?>
+                    Create and edit pages for your website. Use the Rich Text Editor for formatted content or the Visual Builder for drag-and-drop page design.
+                <?php else: ?>
+                    Manage all your website pages. Create new pages, edit existing ones, and control their visibility and SEO settings.
+                <?php endif; ?>
+            </p>
+            <?php if ($action !== 'edit' && $action !== 'add'): ?>
+            <div class="admin-page-actions">
+                <a href="?action=add" class="admin-btn admin-btn-primary">
+                    <span>➕</span> Add New Page
+                </a>
+            </div>
+            <?php endif; ?>
+        </div>
         
         <?php if (isset($message)): ?>
-            <div class="notice notice-success"><p><?php echo htmlspecialchars($message); ?></p></div>
+            <div class="admin-notice admin-notice-success">
+                <div class="admin-notice-icon">✅</div>
+                <div class="admin-notice-content">
+                    <strong>Success!</strong>
+                    <p><?php echo htmlspecialchars($message); ?></p>
+                </div>
+            </div>
         <?php endif; ?>
         
         <?php if ($action === 'edit' || $action === 'add'): ?>
-            <form method="post" class="post-form">
-                <div class="form-group">
-                    <label>Title</label>
-                    <input type="text" name="title" value="<?php echo htmlspecialchars($page['title'] ?? ''); ?>" required class="large-text">
-                </div>
-                <div class="form-group">
-                    <label>Slug (URL)</label>
-                    <input type="text" name="slug" value="<?php echo htmlspecialchars($page['slug'] ?? ''); ?>" required <?php echo ($page['slug'] ?? '') === 'home' ? 'readonly' : ''; ?>>
-                    <p class="description">
-                        <?php if (($page['slug'] ?? '') === 'home'): ?>
-                            <strong>Homepage:</strong> This is your site's homepage. The slug is automatically set to "home".
-                        <?php else: ?>
-                            The URL-friendly version of the name. Leave empty to auto-generate from title.
-                        <?php endif; ?>
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Content</label>
-                    <div style="margin-bottom: 10px;">
-                        <button type="button" id="editor-toggle" class="button" style="margin-right: 10px;">
-                            <span id="editor-mode-text">Switch to Visual Builder</span>
-                        </button>
-                        <span class="description" style="display: inline-block; margin-left: 10px;">
-                            Choose between Rich Text Editor or Visual Builder (Elementor-like)
-                        </span>
+            <div class="admin-card">
+                <form method="post" class="admin-form">
+                    <div class="admin-form-group">
+                        <label>Page Title *</label>
+                        <input type="text" name="title" value="<?php echo htmlspecialchars($page['title'] ?? ''); ?>" required>
+                        <div class="admin-form-help">The title of your page as it will appear on the website.</div>
                     </div>
-                    <div id="ckeditor-container" style="display: block;">
-                        <textarea name="content" id="content-editor" rows="20" class="large-text"><?php echo htmlspecialchars($page['content'] ?? ''); ?></textarea>
-                        <p class="description">Use the rich text editor above to format your content. You can add images, links, lists, and more.</p>
-                    </div>
-                    <div id="grapesjs-container" style="display: none; border: 1px solid #c3c4c7; border-radius: 4px; overflow: hidden; position: relative;">
-                        <div style="background: #f6f7f7; padding: 10px; border-bottom: 1px solid #c3c4c7; display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-weight: 600; color: #1e293b;">Visual Builder</span>
-                            <button type="button" id="gjs-save-btn" class="button button-primary" style="display: none; margin: 0;">
-                                💾 Save & Continue Editing
-                            </button>
+                    
+                    <div class="admin-form-group">
+                        <label>Slug (URL) *</label>
+                        <input type="text" name="slug" value="<?php echo htmlspecialchars($page['slug'] ?? ''); ?>" required <?php echo ($page['slug'] ?? '') === 'home' ? 'readonly' : ''; ?>>
+                        <div class="admin-form-help">
+                            <?php if (($page['slug'] ?? '') === 'home'): ?>
+                                <strong>Homepage:</strong> This is your site's homepage. The slug is automatically set to "home".
+                            <?php else: ?>
+                                The URL-friendly version of the name. Leave empty to auto-generate from title. Example: "about-us" creates the URL /cms/about-us
+                            <?php endif; ?>
                         </div>
-                        <div id="gjs-editor"></div>
-                        <textarea name="grapesjs-content" id="grapesjs-content" style="display: none;"></textarea>
+                    </div>
+                    
+                    <div class="admin-form-group">
+                        <label>Content</label>
+                        <div style="margin-bottom: 12px; padding: 12px; background: #f6f7f7; border-radius: 8px; border: 1px solid #c3c4c7;">
+                            <button type="button" id="editor-toggle" class="admin-btn admin-btn-outline admin-btn-sm">
+                                <span id="editor-mode-text">🎨 Switch to Visual Builder</span>
+                            </button>
+                            <span style="margin-left: 12px; color: #646970; font-size: 13px;">
+                                Choose between Rich Text Editor or Visual Builder (Elementor-like drag-and-drop)
+                            </span>
+                        </div>
+                        <div id="ckeditor-container" style="display: block;">
+                            <textarea name="content" id="content-editor" rows="20"><?php echo htmlspecialchars($page['content'] ?? ''); ?></textarea>
+                            <div class="admin-form-help">Use the rich text editor above to format your content. You can add images, links, lists, tables, and more.</div>
+                        </div>
+                        <div id="grapesjs-container" style="display: none; border: 2px solid #c3c4c7; border-radius: 8px; overflow: hidden; position: relative;">
+                            <div style="background: linear-gradient(135deg, #f6f7f7 0%, #ffffff 100%); padding: 12px 16px; border-bottom: 2px solid #c3c4c7; display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-weight: 600; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                                    <span>🎨</span> Visual Builder
+                                </span>
+                                <button type="button" id="gjs-save-btn" class="admin-btn admin-btn-success admin-btn-sm" style="display: none;">
+                                    💾 Save & Continue Editing
+                                </button>
+                            </div>
+                            <div id="gjs-editor"></div>
+                            <textarea name="grapesjs-content" id="grapesjs-content" style="display: none;"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="admin-form-group">
+                            <label>Status</label>
+                            <select name="status">
+                                <option value="draft" <?php echo ($page['status'] ?? 'draft') === 'draft' ? 'selected' : ''; ?>>Draft</option>
+                                <option value="published" <?php echo ($page['status'] ?? '') === 'published' ? 'selected' : ''; ?>>Published</option>
+                            </select>
+                            <div class="admin-form-help">Draft pages are not visible to visitors. Published pages are live on your website.</div>
+                        </div>
+                    </div>
+                    
+                    <div class="admin-card" style="margin-top: 24px; background: #f6f7f7;">
+                        <h3 style="margin: 0 0 16px 0; font-size: 16px; color: #1d2327;">🔍 SEO Settings</h3>
+                        <div class="admin-form-group">
+                            <label>SEO Title</label>
+                            <input type="text" name="seo_title" value="<?php echo htmlspecialchars($page['seo_title'] ?? ''); ?>" placeholder="Leave empty to use page title">
+                            <div class="admin-form-help">The title that appears in search engine results. Recommended: 50-60 characters.</div>
+                        </div>
+                        <div class="admin-form-group">
+                            <label>SEO Description</label>
+                            <textarea name="seo_description" rows="3" placeholder="Brief description for search engines"><?php echo htmlspecialchars($page['seo_description'] ?? ''); ?></textarea>
+                            <div class="admin-form-help">A brief description that appears in search engine results. Recommended: 150-160 characters.</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 24px; padding-top: 24px; border-top: 2px solid #c3c4c7; display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button type="submit" name="save_page" class="admin-btn admin-btn-primary">
+                            <span>💾</span> Save Page
+                        </button>
+                        <?php if ($id && $id !== 'home' && !isset($page['is_homepage'])): ?>
+                            <button type="submit" name="delete_page" class="admin-btn admin-btn-danger" onclick="return confirm('Are you sure you want to delete this page? This action cannot be undone.');">
+                                <span>🗑️</span> Delete Page
+                            </button>
+                        <?php endif; ?>
+                        <a href="pages.php" class="admin-btn admin-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        <?php else: ?>
+            <!-- Info Notice -->
+            <div class="admin-notice admin-notice-success">
+                <div class="admin-notice-icon">💡</div>
+                <div class="admin-notice-content">
+                    <strong>Homepage Editing:</strong>
+                    <p>The homepage is listed at the top of this table with a blue "Homepage" badge. Click "Create/Edit Homepage" to edit the main content section. The hero banner (top section) is controlled by Site Title and Tagline in Settings.</p>
+                </div>
+            </div>
+            
+            <!-- Special Pages Section -->
+            <div class="admin-card" style="border-left: 4px solid #2563eb; background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(37, 99, 235, 0.02) 100%);">
+                <div class="admin-card-header">
+                    <h2>⚡ Special Functional Pages</h2>
+                </div>
+                <p style="color: #646970; margin-bottom: 20px; font-size: 14px;">These pages have special functionality and can be edited via file or settings:</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+                    <div style="background: white; border: 1px solid #c3c4c7; border-radius: 8px; padding: 16px; transition: all 0.3s ease;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <span style="font-size: 24px;">📋</span>
+                            <strong style="font-size: 15px; color: #1d2327;">Estimates</strong>
+                            <span class="admin-badge admin-badge-published" style="margin-left: auto; font-size: 10px; padding: 4px 8px;">Special</span>
+                        </div>
+                        <p style="margin: 0 0 12px 0; color: #646970; font-size: 13px; line-height: 1.5;">Estimate request form page for customer inquiries</p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <a href="<?php echo $baseUrl; ?>/cms/quote" target="_blank" class="admin-action-btn admin-action-btn-view">View Page</a>
+                            <a href="<?php echo $baseUrl; ?>/cms/public/quote.php" class="admin-action-btn admin-action-btn-edit">Edit File</a>
+                        </div>
+                    </div>
+                    <div style="background: white; border: 1px solid #c3c4c7; border-radius: 8px; padding: 16px; transition: all 0.3s ease;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <span style="font-size: 24px;">🚛</span>
+                            <strong style="font-size: 15px; color: #1d2327;">Request Rig</strong>
+                            <span class="admin-badge admin-badge-published" style="margin-left: auto; font-size: 10px; padding: 4px 8px;">Special</span>
+                        </div>
+                        <p style="margin: 0 0 12px 0; color: #646970; font-size: 13px; line-height: 1.5;">Rig rental request form for drilling services</p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <a href="<?php echo $baseUrl; ?>/cms/rig-request" target="_blank" class="admin-action-btn admin-action-btn-view">View Page</a>
+                            <a href="<?php echo $baseUrl; ?>/cms/public/rig-request.php" class="admin-action-btn admin-action-btn-edit">Edit File</a>
+                        </div>
+                    </div>
+                    <div style="background: white; border: 1px solid #c3c4c7; border-radius: 8px; padding: 16px; transition: all 0.3s ease;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <span style="font-size: 24px;">📧</span>
+                            <strong style="font-size: 15px; color: #1d2327;">Contact Us</strong>
+                            <span class="admin-badge admin-badge-published" style="margin-left: auto; font-size: 10px; padding: 4px 8px;">Special</span>
+                        </div>
+                        <p style="margin: 0 0 12px 0; color: #646970; font-size: 13px; line-height: 1.5;">Contact form and company information</p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <a href="<?php echo $baseUrl; ?>/cms/contact" target="_blank" class="admin-action-btn admin-action-btn-view">View Page</a>
+                            <a href="settings.php#contact" class="admin-action-btn admin-action-btn-edit">Edit Info</a>
+                            <a href="<?php echo $baseUrl; ?>/cms/public/contact.php" class="admin-action-btn admin-action-btn-edit">Edit File</a>
+                        </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Status</label>
-                    <select name="status">
-                        <option value="draft" <?php echo ($page['status'] ?? 'draft') === 'draft' ? 'selected' : ''; ?>>Draft</option>
-                        <option value="published" <?php echo ($page['status'] ?? '') === 'published' ? 'selected' : ''; ?>>Published</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>SEO Title</label>
-                    <input type="text" name="seo_title" value="<?php echo htmlspecialchars($page['seo_title'] ?? ''); ?>" class="large-text">
-                </div>
-                <div class="form-group">
-                    <label>SEO Description</label>
-                    <textarea name="seo_description" rows="3" class="large-text"><?php echo htmlspecialchars($page['seo_description'] ?? ''); ?></textarea>
-                </div>
-                <p class="submit">
-                    <input type="submit" name="save_page" class="button button-primary" value="Save Page">
-                    <?php if ($id && $id !== 'home' && !isset($page['is_homepage'])): ?>
-                        <input type="submit" name="delete_page" class="button button-delete" value="Delete" onclick="return confirm('Are you sure?');">
-                    <?php endif; ?>
-                    <a href="pages.php" class="button">Cancel</a>
-                </p>
-            </form>
-        <?php else: ?>
-            <div class="notice notice-info" style="margin: 15px 0; padding: 12px;">
-                <p><strong>💡 Homepage Editing:</strong> The homepage is listed at the top of this table with a blue "Homepage" badge. Click "Create/Edit Homepage" to edit the main content section. The hero banner (top section) is controlled by Site Title and Tagline in Settings. <a href="?action=edit&id=home" style="font-weight: 600;">Edit Homepage Now →</a></p>
             </div>
-            <a href="?action=add" class="page-title-action">Add New</a>
-            <table class="wp-list-table widefat fixed striped">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Slug</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($pages as $p): ?>
-                        <tr>
-                            <td>
-                                <strong><?php echo htmlspecialchars($p['title']); ?></strong>
-                                <?php if (($p['slug'] ?? '') === 'home' || isset($p['is_homepage'])): ?>
-                                    <span style="background: #0ea5e9; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px;">Homepage</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?php echo htmlspecialchars($p['slug']); ?></td>
-                            <td><span class="status-<?php echo $p['status'] ?? 'published'; ?>"><?php echo ucfirst($p['status'] ?? 'Published'); ?></span></td>
-                            <td><?php echo isset($p['created_at']) ? date('Y/m/d', strtotime($p['created_at'])) : '-'; ?></td>
-                            <td>
-                                <?php if (isset($p['is_homepage'])): ?>
-                                    <a href="?action=edit&id=home">Create/Edit Homepage</a> |
-                                    <a href="<?php echo $baseUrl; ?>/" target="_blank">View</a>
-                                <?php else: ?>
-                                    <a href="?action=edit&id=<?php echo $p['id']; ?>">Edit</a> |
-                                    <a href="<?php echo $baseUrl; ?>/cms/<?php echo htmlspecialchars($p['slug']); ?>" target="_blank">View</a>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+            
+            <!-- Pages List -->
+            <div class="admin-card">
+                <div class="admin-card-header">
+                    <h2>📋 All Pages</h2>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="search" id="pageSearch" placeholder="Search pages..." 
+                               style="padding: 8px 12px; border: 2px solid #c3c4c7; border-radius: 6px; font-size: 13px; min-width: 200px;"
+                               onkeyup="filterPagesTable()">
+                    </div>
+                </div>
+                
+                <?php if (empty($pages)): ?>
+                    <div class="admin-empty-state">
+                        <div class="admin-empty-state-icon">📄</div>
+                        <h3>No pages found</h3>
+                        <p>Get started by creating your first page.</p>
+                        <a href="?action=add" class="admin-btn admin-btn-primary">Add New Page</a>
+                    </div>
+                <?php else: ?>
+                    <div class="admin-table-wrapper">
+                        <table class="admin-table" id="pagesTable">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Slug</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($pages as $p): ?>
+                                    <tr data-page-title="<?php echo strtolower(htmlspecialchars($p['title'])); ?>">
+                                        <td>
+                                            <strong style="color: #1d2327;"><?php echo htmlspecialchars($p['title']); ?></strong>
+                                            <?php if (($p['slug'] ?? '') === 'home' || isset($p['is_homepage'])): ?>
+                                                <span class="admin-badge admin-badge-published" style="margin-left: 8px; font-size: 10px; padding: 4px 8px;">🏠 Homepage</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <code style="background: #f6f7f7; padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #646970;">
+                                                <?php echo htmlspecialchars($p['slug']); ?>
+                                            </code>
+                                        </td>
+                                        <td>
+                                            <span class="admin-badge admin-badge-<?php echo ($p['status'] ?? 'published') === 'published' ? 'published' : 'draft'; ?>">
+                                                <?php echo ucfirst($p['status'] ?? 'Published'); ?>
+                                            </span>
+                                        </td>
+                                        <td style="color: #646970; font-size: 13px;">
+                                            <?php echo isset($p['created_at']) ? date('M j, Y', strtotime($p['created_at'])) : '-'; ?>
+                                        </td>
+                                        <td>
+                                            <div class="admin-actions">
+                                                <?php if (isset($p['is_homepage'])): ?>
+                                                    <a href="?action=edit&id=home" class="admin-action-btn admin-action-btn-edit">✏️ Edit</a>
+                                                    <a href="<?php echo $baseUrl; ?>/" target="_blank" class="admin-action-btn admin-action-btn-view">👁️ View</a>
+                                                <?php else: ?>
+                                                    <a href="?action=edit&id=<?php echo $p['id']; ?>" class="admin-action-btn admin-action-btn-edit">✏️ Edit</a>
+                                                    <a href="<?php echo $baseUrl; ?>/cms/<?php echo htmlspecialchars($p['slug']); ?>" target="_blank" class="admin-action-btn admin-action-btn-view">👁️ View</a>
+                                                <?php endif; ?>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+            
+            <script>
+            function filterPagesTable() {
+                const search = document.getElementById('pageSearch').value.toLowerCase();
+                const rows = document.querySelectorAll('#pagesTable tbody tr');
+                
+                rows.forEach(row => {
+                    const pageTitle = row.getAttribute('data-page-title') || '';
+                    row.style.display = !search || pageTitle.includes(search) ? '' : 'none';
+                });
+            }
+            </script>
         <?php endif; ?>
     </div>
 </body>

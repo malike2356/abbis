@@ -3,9 +3,14 @@
  * Application Configuration
  */
 
-// Environment
-define('APP_ENV', getenv('APP_ENV') ?: 'development'); // Set to 'development' for local testing
-define('DEBUG', APP_ENV === 'development');
+require_once __DIR__ . '/environment.php';
+
+// Load URL Manager (Single Source of Truth for all URLs)
+require_once __DIR__ . '/../includes/url-manager.php';
+
+// Load Super Admin configuration (development bypass)
+// This is loaded early to ensure Super Admin bypass is available
+require_once __DIR__ . '/super-admin.php';
 
 // Error Reporting - Enable for development
 error_reporting(E_ALL);
@@ -22,9 +27,6 @@ if (!defined('APP_NAME')) {
 }
 if (!defined('APP_VERSION')) {
     define('APP_VERSION', '3.2.0');
-}
-if (!defined('APP_URL')) {
-    define('APP_URL', 'http://localhost:8080/abbis3.2');  // Use port 8080 if Apache uses it
 }
 
 // Paths (only define if not already defined)
@@ -49,6 +51,4 @@ if (!file_exists(LOG_PATH)) {
 // Security
 define('SESSION_LIFETIME', 7200); // 2 hours
 define('CSRF_TOKEN_LIFETIME', 3600); // 1 hour
-
-?>
 

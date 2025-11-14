@@ -60,6 +60,21 @@ if ($gateway === 'paystack') {
             $pdo->prepare("UPDATE cms_orders SET status='processing' WHERE id=?")
                 ->execute([$order['id']]);
             
+            // Automatically track CMS payment in accounting
+            try {
+                require_once $rootPath . '/includes/AccountingAutoTracker.php';
+                $accountingTracker = new AccountingAutoTracker($pdo);
+                $accountingTracker->trackCMSPayment($payment['id'], [
+                    'order_number' => $order['order_number'],
+                    'amount' => floatval($payment['amount'] ?? $order['total_amount']),
+                    'payment_method' => 'paystack',
+                    'payment_date' => date('Y-m-d'),
+                    'created_by' => $_SESSION['user_id'] ?? null
+                ]);
+            } catch (Exception $e) {
+                error_log("Accounting auto-tracking error for CMS payment: " . $e->getMessage());
+            }
+            
             $success = true;
         } else {
             $error = $verification['error'] ?? 'Payment verification failed';
@@ -80,6 +95,21 @@ if ($gateway === 'paystack') {
             
             $pdo->prepare("UPDATE cms_orders SET status='processing' WHERE id=?")
                 ->execute([$order['id']]);
+            
+            // Automatically track CMS payment in accounting
+            try {
+                require_once $rootPath . '/includes/AccountingAutoTracker.php';
+                $accountingTracker = new AccountingAutoTracker($pdo);
+                $accountingTracker->trackCMSPayment($payment['id'], [
+                    'order_number' => $order['order_number'],
+                    'amount' => floatval($payment['amount'] ?? $order['total_amount']),
+                    'payment_method' => 'flutterwave',
+                    'payment_date' => date('Y-m-d'),
+                    'created_by' => $_SESSION['user_id'] ?? null
+                ]);
+            } catch (Exception $e) {
+                error_log("Accounting auto-tracking error for CMS payment: " . $e->getMessage());
+            }
             
             $success = true;
         } else {

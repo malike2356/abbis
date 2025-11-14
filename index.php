@@ -11,12 +11,7 @@ $cmsEnabled = isFeatureEnabled('cms');
 
 if ($cmsEnabled) {
     // CMS is enabled - redirect to CMS homepage
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
-    header('Location: ' . $baseUrl . '/cms/');
+    header('Location: ' . app_url('cms/'));
     exit;
 }
 

@@ -13,15 +13,14 @@ define('DB_PASS', 'your_password');
 define('DB_NAME', 'abbis_3_2');
 define('DB_CHARSET', 'utf8mb4');
 
+require_once __DIR__ . '/environment.php';
+
 // Application configuration (only define if not already defined)
 if (!defined('APP_NAME')) {
     define('APP_NAME', 'ABBIS v3.2');
 }
 if (!defined('APP_VERSION')) {
     define('APP_VERSION', '3.2.0');
-}
-if (!defined('APP_URL')) {
-    define('APP_URL', 'http://localhost:8080/abbis3.2');
 }
 if (!defined('UPLOAD_PATH')) {
     define('UPLOAD_PATH', __DIR__ . '/../uploads/');

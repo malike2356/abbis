@@ -10,8 +10,10 @@ require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/config-manager.php';
 require_once '../includes/helpers.php';
+require_once '../includes/pos/PosRepository.php';
 
 $auth->requireAuth();
+$auth->requirePermission('field_reports.manage');
 
 // Load config data dynamically (no hardcoding)
 $rigs = $configManager->getRigs('active');
@@ -19,9 +21,16 @@ $workers = $configManager->getWorkers('active');
 $materials = $configManager->getMaterials();
 $rodLengths = $configManager->getRodLengths();
 $clients = []; // Will be loaded via AJAX
+$posRepo = new PosRepository();
+$posStores = $posRepo->getStores();
 
 require_once '../includes/header.php';
 ?>
+
+<script>
+    window.POS_STORES = <?php echo json_encode($posStores, JSON_UNESCAPED_UNICODE); ?>;
+    window.SYSTEM_CURRENCY = <?php echo json_encode(getCurrency(), JSON_UNESCAPED_UNICODE); ?>;
+</script>
 
             <!-- Page Header -->
             <div class="page-header">
@@ -60,7 +69,7 @@ require_once '../includes/header.php';
             </div>
 
             <!-- Main Form with Tabs -->
-            <form method="POST" action="../api/save-report.php" class="ajax-form" id="fieldReportForm">
+            <form method="POST" action="<?php echo api_url('save-report.php'); ?>" class="ajax-form" id="fieldReportForm">
                 <?php echo CSRF::getTokenField(); ?>
                 
                 <!-- Tab Navigation -->
@@ -322,9 +331,32 @@ require_once '../includes/header.php';
                                     <label for="materials_provided_by" class="form-label">Materials Provided By</label>
                                     <select id="materials_provided_by" name="materials_provided_by" class="form-control">
                                         <option value="client">Client</option>
-                                        <option value="company">Company</option>
-                                        <option value="material_shop">Material Shop</option>
+                                        <option value="company_shop">Company (Shop/POS)</option>
+                                        <option value="company_store">Company (Store/Warehouse)</option>
                                     </select>
+                                    <small class="form-text" style="display:block;margin-top:4px;color:var(--secondary);">
+                                        <strong>Client:</strong> Materials provided by the client<br>
+                                        <strong>Company (Shop/POS):</strong> Materials directly from the shop/POS<br>
+                                        <strong>Company (Store/Warehouse):</strong> Materials from the Material Store (already moved from POS)
+                                    </small>
+                                </div>
+                                <div class="form-group" id="materials_store_group" style="display: none;">
+                                    <label for="materials_store_id" class="form-label">POS Store</label>
+                                    <select id="materials_store_id" name="materials_store_id" class="form-control" onchange="fieldReportsManager.loadStoreStock(this.value)">
+                                        <option value="">Select Store</option>
+                                        <?php foreach ($posStores as $store): ?>
+                                            <option value="<?php echo (int) $store['id']; ?>" data-store-name="<?php echo e($store['store_name']); ?>">
+                                                <?php echo e($store['store_name']); ?> (<?php echo e($store['store_code']); ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <small class="form-text" style="display:block;margin-top:4px;color:var(--secondary);">
+                                        Selecting a POS store will show available stock and update levels automatically when this report is submitted.
+                                    </small>
+                                    <div id="store_stock_info" style="margin-top: 8px; padding: 8px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; font-size: 12px; display: none;">
+                                        <strong>Available Stock:</strong>
+                                        <div id="store_stock_details" style="margin-top: 4px;"></div>
+                                    </div>
                                 </div>
                             </div>
                             
@@ -379,8 +411,20 @@ require_once '../includes/header.php';
                                     <input type="text" id="gravel_remaining" class="form-control" readonly style="font-weight: 500;">
                                 </div>
                                 <div class="form-group">
-                                    <label for="materials_value" class="form-label">Materials Value (Assets) (GHS)</label>
+                                    <label for="materials_value" class="form-label">Materials Value (Assets) (<?php echo e(getCurrency()); ?>)</label>
                                     <input type="number" id="materials_value" name="materials_value" class="form-control" step="0.01" readonly style="font-weight: 500;">
+                                </div>
+                            </div>
+                            
+                            <!-- Row 7: Materials Cost Calculation Info -->
+                            <div class="form-row" id="materials_cost_info_row" style="display: none;">
+                                <div class="form-group full-width">
+                                    <div style="padding: 12px; background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; border-radius: 6px; font-size: 13px;">
+                                        <strong style="color: #3b82f6;">💡 Materials Cost Calculation:</strong>
+                                        <div id="materials_cost_info" style="margin-top: 6px; color: var(--text);">
+                                            <!-- Dynamically updated based on job_type and materials_provided_by -->
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             
@@ -442,7 +486,7 @@ require_once '../includes/header.php';
                             </table>
                         </div>
                         <div style="margin-top: 20px;">
-                            <strong>Total Wages: <span id="total_wages_display">GHS 0.00</span></strong>
+                            <strong>Total Wages: <span id="total_wages_display"><?php echo e(getCurrency()); ?> 0.00</span></strong>
                         </div>
                     </div>
                 </div>
@@ -463,37 +507,37 @@ require_once '../includes/header.php';
                                 </div>
                                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
                                     <div class="form-group">
-                                        <label for="balance_bf" class="form-label">Balance B/F (GHS)</label>
+                                        <label for="balance_bf" class="form-label">Balance B/F (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="balance_bf" name="balance_bf" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="contract_sum" class="form-label" id="contract_sum_label">Contract Sum (GHS)</label>
+                                        <label for="contract_sum" class="form-label" id="contract_sum_label">Contract Sum (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="contract_sum" name="contract_sum" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="rig_fee_charged" class="form-label">Rig Fee Expected (GHS)</label>
+                                        <label for="rig_fee_charged" class="form-label">Rig Fee Expected (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="rig_fee_charged" name="rig_fee_charged" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="rig_fee_collected" class="form-label">Rig Fee Collected (GHS)</label>
+                                        <label for="rig_fee_collected" class="form-label">Rig Fee Collected (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="rig_fee_collected" name="rig_fee_collected" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="cash_received" class="form-label">Cash Received (GHS)</label>
+                                        <label for="cash_received" class="form-label">Cash from Office (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="cash_received" name="cash_received" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="materials_income" class="form-label">Materials Income (GHS)</label>
+                                        <label for="materials_income" class="form-label">Materials Income (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="materials_income" name="materials_income" class="form-control" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #10b981; background: rgba(16,185,129,0.1);">
                                     </div>
@@ -510,26 +554,26 @@ require_once '../includes/header.php';
                                 </div>
                                 <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
                                     <div class="form-group">
-                                        <label for="materials_cost" class="form-label">Materials Cost (GHS)</label>
+                                        <label for="materials_cost" class="form-label">Materials Cost (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="materials_cost" name="materials_cost" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #ef4444; background: rgba(239,68,68,0.1);">
                                     </div>
                                     
 
                                     <div class="form-group">
-                                        <label for="momo_transfer" class="form-label">MoMo to Company (GHS)</label>
+                                        <label for="momo_transfer" class="form-label">MoMo to Company (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="momo_transfer" name="momo_transfer" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #0ea5e9; background: rgba(14,165,233,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="cash_given" class="form-label">Cash to Company (GHS)</label>
+                                        <label for="cash_given" class="form-label">Cash to Company (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="cash_given" name="cash_given" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #0ea5e9; background: rgba(14,165,233,0.1);">
                                     </div>
                                     
                                     <div class="form-group">
-                                        <label for="bank_deposit" class="form-label">Bank Deposit (GHS)</label>
+                                        <label for="bank_deposit" class="form-label">Bank Deposit (<?php echo e(getCurrency()); ?>)</label>
                                         <input type="number" id="bank_deposit" name="bank_deposit" class="form-control financial-input" 
                                                step="0.01" min="0" value="0" style="border-left: 4px solid #0ea5e9; background: rgba(14,165,233,0.1);">
                                     </div>
@@ -665,8 +709,8 @@ const financialGuideData = {
                 meaning: 'the actual amount of money collected from the client and this is income'
             },
             {
-                name: 'Cash Recieved',
-                meaning: 'Cash recieved from company for business operations. This is NOT cash recieved from client'
+                name: 'Cash from Office',
+                meaning: 'Cash received from company/office for business operations. This is NOT cash received from client'
             },
             {
                 name: 'Material Sold',

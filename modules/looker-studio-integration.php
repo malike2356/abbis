@@ -42,7 +42,7 @@ require_once '../includes/header.php';
                     <ul>
                         <li>Use: <code><?php 
                             $protocol = isset($_SERVER['HTTPS']) ? 'https' : 'http';
-                            echo $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname(dirname($_SERVER['PHP_SELF'])) . '/api/looker-studio-api.php';
+                            echo api_url('looker-studio-api.php');
                         ?></code></li>
                     </ul>
                 </li>
@@ -97,22 +97,15 @@ require_once '../includes/header.php';
             <div style="margin-top: 20px;">
                 <h3>Get Data</h3>
                 <pre style="background: var(--bg); padding: 12px; border-radius: 6px; overflow-x: auto;">
-GET <?php 
-    $protocol = isset($_SERVER['HTTPS']) ? 'https' : 'http';
-    echo $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname(dirname($_SERVER['PHP_SELF'])) . '/api/looker-studio-api.php?action=data&data_source=field_reports';
-?></pre>
+GET <?php echo api_url('looker-studio-api.php', ['action' => 'data', 'data_source' => 'field_reports']); ?></pre>
                 
                 <h3 style="margin-top: 20px;">Get Schema</h3>
                 <pre style="background: var(--bg); padding: 12px; border-radius: 6px; overflow-x: auto;">
-GET <?php 
-    echo $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname(dirname($_SERVER['PHP_SELF'])) . '/api/looker-studio-api.php?action=schema&data_source=field_reports';
-?></pre>
+GET <?php echo api_url('looker-studio-api.php', ['action' => 'schema', 'data_source' => 'field_reports']); ?></pre>
                 
                 <h3 style="margin-top: 20px;">Get Metrics</h3>
                 <pre style="background: var(--bg); padding: 12px; border-radius: 6px; overflow-x: auto;">
-GET <?php 
-    echo $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname(dirname($_SERVER['PHP_SELF'])) . '/api/looker-studio-api.php?action=metrics';
-?></pre>
+GET <?php echo api_url('looker-studio-api.php', ['action' => 'metrics']); ?></pre>
             </div>
         </div>
         

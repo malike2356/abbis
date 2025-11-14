@@ -2,12 +2,23 @@
 /**
  * Asset Categories Management (lightweight)
  */
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
 
 $pdo = getDBConnection();
 
 // Handle add/update/delete (simple, non-AJAX)
 $actionType = $_POST['action_type'] ?? '';
 if ($actionType) {
+    // CSRF protection
+    if (!CSRF::validateToken($_POST['csrf_token'] ?? '')) {
+        die('Invalid security token');
+    }
     try {
         if ($actionType === 'add') {
             $stmt = $pdo->prepare("INSERT INTO asset_categories (category_name, description) VALUES (?, ?)");
@@ -62,6 +73,7 @@ try {
     <!-- Inline Add Form (hidden by default) -->
     <div id="addCategoryForm" class="dashboard-card" style="display:none;">
         <form method="post" style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <?php echo CSRF::getTokenField(); ?>
             <input type="hidden" name="action_type" value="add">
             <div>
                 <label class="form-label">Category Name</label>
@@ -103,6 +115,7 @@ try {
                                 <td>
                                     <button class="btn btn-sm btn-outline" onclick="editCategory(<?php echo $cat['id']; ?>, '<?php echo e(addslashes($cat['category_name'])); ?>', '<?php echo e(addslashes($cat['description'])); ?>')">Edit</button>
                                     <form method="post" style="display:inline;" onsubmit="return confirm('Delete this category?');">
+                                        <?php echo CSRF::getTokenField(); ?>
                                         <input type="hidden" name="action_type" value="delete">
                                         <input type="hidden" name="id" value="<?php echo $cat['id']; ?>">
                                         <button type="submit" class="btn btn-sm btn-outline">Delete</button>
@@ -119,6 +132,7 @@ try {
     <!-- Edit Modal (very lightweight) -->
     <div id="editCategoryModal" class="dashboard-card" style="display:none; position: fixed; left: 50%; top: 20%; transform: translateX(-50%); max-width: 700px; width: 90%; z-index: 1000;">
         <form method="post" style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <?php echo CSRF::getTokenField(); ?>
             <input type="hidden" name="action_type" value="edit">
             <input type="hidden" name="id" id="edit_id">
             <div>

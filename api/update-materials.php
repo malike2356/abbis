@@ -2,6 +2,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/validation.php';
+require_once '../includes/AccountingAutoTracker.php';
 
 $auth->requireAuth();
 
@@ -69,6 +70,71 @@ try {
             $updatedStmt->execute([$materialType]);
             $updatedMaterial = $updatedStmt->fetch();
             
+            // SYSTEM-WIDE SYNC: Update inventory across CMS, POS, and ABBIS
+            // When materials are received, they go TO operations (materials_inventory) ✓ Already done above
+            // Also need to update catalog_items (CMS/POS source of truth) and pos_inventory
+            try {
+                require_once __DIR__ . '/../includes/pos/UnifiedInventoryService.php';
+                $inventoryService = new UnifiedInventoryService($pdo);
+                
+                // Get material mapping to find catalog_item_id
+                $mappingStmt = $pdo->prepare("
+                    SELECT catalog_item_id, pos_product_id 
+                    FROM pos_material_mappings 
+                    WHERE material_type = ?
+                ");
+                $mappingStmt->execute([$materialType]);
+                $mapping = $mappingStmt->fetch(PDO::FETCH_ASSOC);
+                
+                $catalogItemId = null;
+                if ($mapping && $mapping['catalog_item_id']) {
+                    $catalogItemId = (int)$mapping['catalog_item_id'];
+                } else {
+                    // Try to find catalog item by material type name pattern
+                    $materialName = ucfirst(str_replace('_', ' ', $materialType));
+                    $catalogStmt = $pdo->prepare("
+                        SELECT id FROM catalog_items 
+                        WHERE (name LIKE ? OR sku LIKE ?) 
+                        AND item_type = 'product'
+                        LIMIT 1
+                    ");
+                    $searchPattern = "%{$materialName}%";
+                    $catalogStmt->execute([$searchPattern, $searchPattern]);
+                    $catalogItem = $catalogStmt->fetch(PDO::FETCH_ASSOC);
+                    
+                    if ($catalogItem) {
+                        $catalogItemId = (int)$catalogItem['id'];
+                        // Create mapping for future use
+                        try {
+                            $mapStmt = $pdo->prepare("
+                                INSERT INTO pos_material_mappings (material_type, catalog_item_id, created_at)
+                                VALUES (?, ?, NOW())
+                                ON DUPLICATE KEY UPDATE catalog_item_id = VALUES(catalog_item_id)
+                            ");
+                            $mapStmt->execute([$materialType, $catalogItemId]);
+                        } catch (PDOException $e) {
+                            error_log("[update-materials] Could not create mapping: " . $e->getMessage());
+                        }
+                    }
+                }
+                
+                // Update catalog_items (source of truth) - this syncs to POS and CMS automatically
+                if ($catalogItemId) {
+                    $inventoryService->updateCatalogStock(
+                        $catalogItemId,
+                        $quantityReceived, // Positive = increase inventory
+                        "Material receipt: {$materialType} (Purchase)"
+                    );
+                    error_log("[update-materials] Synced material receipt to catalog_item_id {$catalogItemId}: +{$quantityReceived} units");
+                } else {
+                    error_log("[update-materials] WARNING: No catalog_item found for material_type: {$materialType}. Inventory not synced to CMS/POS.");
+                }
+            } catch (Exception $e) {
+                error_log('[update-materials] System-wide inventory sync failed: ' . $e->getMessage());
+                error_log('[update-materials] Stack trace: ' . $e->getTraceAsString());
+                // Continue - don't fail the update if sync fails
+            }
+            
             // Try to log inventory transaction with catalog link
             try {
                 // Ensure migration applied (add catalog_item_id, nullable material_id)
@@ -94,6 +160,50 @@ try {
                     $_SESSION['user_id'] ?? 1,
                     $catalogItemId
                 ]);
+                
+                $transactionId = $pdo->lastInsertId();
+                
+                // Automatically track materials purchase in accounting - runs for EVERY purchase
+                if ($quantityReceived > 0 && $unitCost > 0) {
+                    try {
+                        // Ensure accounting tables exist
+                        try {
+                            $pdo->query("SELECT 1 FROM chart_of_accounts LIMIT 1");
+                        } catch (PDOException $e) {
+                            // Initialize if needed
+                            $migrationFile = __DIR__ . '/../database/accounting_migration.sql';
+                            if (file_exists($migrationFile)) {
+                                $sql = file_get_contents($migrationFile);
+                                if ($sql) {
+                                    foreach (preg_split('/;\s*\n/', $sql) as $stmt) {
+                                        $stmt = trim($stmt);
+                                        if ($stmt) {
+                                            try {
+                                                $pdo->exec($stmt);
+                                            } catch (PDOException $e2) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        $accountingTracker = new AccountingAutoTracker($pdo);
+                        $result = $accountingTracker->trackMaterialsPurchase($transactionId, [
+                            'description' => "Purchase: {$materialType}",
+                            'total_cost' => $quantityReceived * $unitCost,
+                            'unit_cost' => $unitCost,
+                            'quantity' => $quantityReceived,
+                            'transaction_date' => date('Y-m-d'),
+                            'created_by' => $_SESSION['user_id'] ?? 1
+                        ]);
+                        
+                        if ($result) {
+                            error_log("Accounting: Auto-tracked materials purchase transaction ID {$transactionId}");
+                        }
+                    } catch (Exception $e) {
+                        error_log("Accounting auto-tracking error for materials purchase ID {$transactionId}: " . $e->getMessage());
+                    }
+                }
             } catch (Throwable $e) { /* non-fatal */ }
 
             echo json_encode([

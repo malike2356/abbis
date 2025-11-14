@@ -1,9 +1,17 @@
 <?php
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('finance.access');
+
 $pdo = getDBConnection();
 $rows = [];
 try {
     $rows = $pdo->query("SELECT c.account_code, c.account_name,
-        SUM(jl.debit) as debit, SUM(jl.credit) as credit
+        COALESCE(SUM(jl.debit), 0) as debit, COALESCE(SUM(jl.credit), 0) as credit
         FROM chart_of_accounts c
         LEFT JOIN journal_entry_lines jl ON jl.account_id = c.id
         GROUP BY c.id
@@ -19,12 +27,17 @@ $totalDebit = 0; $totalCredit = 0;
         <table class="data-table">
             <thead><tr><th>Code</th><th>Account</th><th>Debit</th><th>Credit</th></tr></thead>
             <tbody>
-                <?php foreach ($rows as $r): $totalDebit += (float)$r['debit']; $totalCredit += (float)$r['credit']; ?>
+                <?php foreach ($rows as $r): 
+                    $debit = (float)$r['debit'];
+                    $credit = (float)$r['credit'];
+                    $totalDebit += $debit; 
+                    $totalCredit += $credit; 
+                ?>
                 <tr>
                     <td><?php echo e($r['account_code']); ?></td>
                     <td><?php echo e($r['account_name']); ?></td>
-                    <td><?php echo number_format($r['debit'],2); ?></td>
-                    <td><?php echo number_format($r['credit'],2); ?></td>
+                    <td><?php echo number_format($debit, 2); ?></td>
+                    <td><?php echo number_format($credit, 2); ?></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>

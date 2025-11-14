@@ -3,6 +3,7 @@
 ## ✅ ALL FEATURES COMPLETED
 
 ### 1. Core System Features ✅
+
 - ✅ **Dynamic Configuration** - No hardcoded entries
 - ✅ **Client Extraction** - Auto-extract from field reports
 - ✅ **Corrected Business Logic** - All financial calculations match specifications
@@ -12,6 +13,7 @@
 - ✅ **Rig Fee Debt Tracking** - Automatic debt management
 
 ### 2. Configuration Management ✅
+
 - ✅ **Rigs CRUD** - Add, Edit, Delete rigs with full details
 - ✅ **Workers CRUD** - Complete worker management with roles and rates
 - ✅ **Materials Management** - Inventory tracking, pricing, quantities
@@ -20,6 +22,7 @@
 - ✅ **Dynamic Data Loading** - All forms populate from database
 
 ### 3. User Management ✅
+
 - ✅ **User CRUD** - Add, Edit, Delete users
 - ✅ **Role Management** - Admin, Manager, Supervisor, Clerk
 - ✅ **Account Status** - Active/Inactive toggle
@@ -27,6 +30,7 @@
 - ✅ **Last Login Tracking**
 
 ### 4. Field Reports ✅
+
 - ✅ **Comprehensive Form** - All fields with proper grouping
 - ✅ **Tab Navigation** - 5 organized tabs
 - ✅ **Client Auto-extraction** - Creates clients automatically
@@ -36,6 +40,7 @@
 - ✅ **Compliance Documents** - Survey and contract uploads
 
 ### 5. Advanced Search & Filtering ✅
+
 - ✅ **Multi-field Search** - Site name, Report ID, Client
 - ✅ **Date Range Filter** - Start and end date
 - ✅ **Rig Filter** - Filter by specific rig
@@ -44,18 +49,21 @@
 - ✅ **Pagination** - 20 items per page with navigation
 
 ### 6. Data Export ✅
+
 - ✅ **Excel Export (CSV)** - All reports
 - ✅ **Excel Export** - Payroll data
 - ✅ **Excel Export** - Financial summaries
 - ✅ **Date Range Export** - Filtered exports
 
 ### 7. PDF Generation ✅
+
 - ✅ **Receipt Generation** - Client receipts with all financials
 - ✅ **Technical Report** - No financial data, technical details only
 - ✅ **Print Functionality** - Browser print support
 - ✅ **Professional Formatting** - Clean, printable layouts
 
 ### 8. Email Notifications ✅
+
 - ✅ **Email Queue System** - Background email processing
 - ✅ **New Report Notifications** - Admin notifications
 - ✅ **Email Templates** - HTML formatted emails
@@ -63,6 +71,7 @@
 - ✅ **Error Handling** - Graceful failures
 
 ### 9. Comprehensive Analytics ✅
+
 - ✅ **Dashboard Stats** - Today and overall metrics
 - ✅ **Profit Trends** - Monthly profit charts
 - ✅ **Rig Performance** - Per-rig analytics
@@ -72,6 +81,7 @@
 - ✅ **Export Options** - Multiple export formats
 
 ### 10. Performance & Optimization ✅
+
 - ✅ **Caching System** - Dashboard stats caching
 - ✅ **Database Indexing** - Optimized queries
 - ✅ **Pagination** - Large list handling
@@ -79,6 +89,7 @@
 - ✅ **Cache Invalidation** - Auto-clear on updates
 
 ### 11. Security Features ✅
+
 - ✅ **CSRF Protection** - All forms protected
 - ✅ **XSS Prevention** - Output escaping
 - ✅ **SQL Injection Prevention** - Prepared statements
@@ -87,6 +98,7 @@
 - ✅ **Password Hashing** - bcrypt with password_verify
 
 ### 12. User Interface ✅
+
 - ✅ **Modern UI** - Clean, professional design
 - ✅ **Responsive Layout** - Mobile-friendly
 - ✅ **Dark/Light Theme** - Theme toggle
@@ -95,19 +107,56 @@
 - ✅ **Loading States** - User feedback
 - ✅ **Alert System** - Success/error messages
 
+### 13. Client Self-Service Portal ✅
+
+- ✅ **Secure Login** - Dedicated `/client-portal/login.php` with role-based access (`client`)
+- ✅ **Dashboard** - Outstanding balances, quote counts, quick actions
+- ✅ **Invoice Payments** - Paystack & Flutterwave integration plus manual payment logging
+- ✅ **Payment History** - Status tracking for each client payment record
+- ✅ **Accounting Sync** - Automatic journal entry (`client_payments` → Accounts Receivable)
+- ✅ **Activity Log** - Every portal action stored in `client_portal_activities`
+- ✅ **Approvals & Downloads** - Clients can approve quotes with signatures and download quote/invoice summaries
+
+### 14. Regulatory Compliance Automation ✅
+
+- ✅ **Template Designer** - HTML/merge-tag editor for government form layouts
+- ✅ **Dynamic Merge Fields** - Populate forms from field reports, rigs, clients, and company profile
+- ✅ **Context Injection** - Supplement templates with custom JSON data at runtime
+- ✅ **Generation Log** - Archives each rendered form with download link and metadata
+- ✅ **API Access** - `/api/regulatory-form-generate.php` for external integrations
+
+### 15. Rig Telemetry & Maintenance Intelligence ✅
+
+- ✅ **Telemetry Streams** - Secure tokens per rig/device with heartbeat tracking
+- ✅ **Automated Thresholds** - Configurable warning/critical limits per metric
+- ✅ **Alert Console** - Live feed with acknowledge/resolve workflow linked to maintenance records
+- ✅ **Event Archive** - Full history of sensor readings for trend analysis
+- ✅ **REST Ingest API** - `/api/rig-telemetry-ingest.php` for IoT devices and data gateways
+
+### 16. Environmental Sampling Workflow ✅
+
+- ✅ **Project Planner** - Schedule sampling campaigns with coordinates, client links, and field reports
+- ✅ **Sample Registry** - Track matrix, collection method, containers, preservatives, and field observations
+- ✅ **Chain-of-Custody Log** - Timestamped custody steps with handlers, conditions, temperature, and lab receipt flags
+- ✅ **Lab Result Capture** - Parameter grouping, detection limits, QA/QC flags, and analyst metadata
+- ✅ **APIs & Documentation** - `/api/environmental-sampling.php`, `/api/environmental-sampling-view.php`, and full guide for integrations
+
 ## 📁 File Structure
 
 ### Core Files
+
 - `index.php` - Main dashboard
 - `login.php` - Authentication
 - `logout.php` - Logout handler
 
 ### Configuration
+
 - `modules/config.php` - Full CRUD interface
 - `includes/config-manager.php` - Configuration backend
 - `api/config-crud.php` - CRUD API
 
 ### Modules
+
 - `modules/field-reports.php` - Comprehensive form
 - `modules/field-reports-list.php` - List with search/pagination
 - `modules/users.php` - User management
@@ -120,6 +169,7 @@
 - `modules/finance.php` - Financial overview
 
 ### API Endpoints
+
 - `api/save-report.php` - Save field reports
 - `api/get-config-data.php` - Dynamic config data
 - `api/client-extract.php` - Client extraction
@@ -128,6 +178,7 @@
 - `api/process-emails.php` - Email processor
 
 ### Includes
+
 - `includes/auth.php` - Authentication system
 - `includes/functions.php` - Core functions with corrected calculations
 - `includes/helpers.php` - Helper functions
@@ -138,6 +189,7 @@
 - `includes/config-manager.php` - Config manager
 
 ### Assets
+
 - `assets/css/styles.css` - Complete styling
 - `assets/js/main.js` - Main application JS
 - `assets/js/field-reports.js` - Field reports JS
@@ -146,25 +198,29 @@
 - `assets/js/config.js` - Config management JS
 
 ### Database
+
 - `database/schema.sql` - Main schema
 - `database/schema_updates.sql` - Additional tables
 
 ## 🚀 Setup Instructions
 
 1. **Database Setup**
+
    ```bash
    # Run main schema
    mysql -u root -p < database/schema.sql
-   
+
    # Run updates
    mysql -u root -p < database/schema_updates.sql
    ```
 
 2. **Configuration**
+
    - Update `config/database.php` with your database credentials
    - Set environment variables if using (DB_HOST, DB_USER, DB_PASS, DB_NAME)
 
 3. **Email Setup** (Optional)
+
    - Configure SMTP in `includes/email.php`
    - Set up cron job for email processing:
      ```bash
@@ -172,6 +228,7 @@
      ```
 
 4. **Permissions**
+
    - Ensure `uploads/` directory exists and is writable for compliance documents
 
 5. **Initial Login**
@@ -225,6 +282,7 @@
 ## ✨ Ready for Production
 
 The system is now complete with all requested features:
+
 - ✅ User management interface
 - ✅ Email notifications
 - ✅ PDF report generation
@@ -237,4 +295,3 @@ The system is now complete with all requested features:
 - ✅ Complete documentation
 
 All features are integrated and ready for use!
-

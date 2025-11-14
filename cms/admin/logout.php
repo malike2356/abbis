@@ -9,14 +9,7 @@ require_once __DIR__ . '/auth.php';
 $cmsAuth = new CMSAuth();
 $cmsAuth->logout();
 
-// Get base URL
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
-
 // Redirect to CMS homepage
-header('Location: ' . $baseUrl . '/cms/');
+header('Location: ' . app_url('cms/'));
 exit;
 

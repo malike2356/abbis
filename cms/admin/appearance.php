@@ -86,111 +86,161 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_theme']) && is
         if ($ext !== 'zip') {
             $error = 'Please upload a ZIP file.';
         } else {
-            // Create temp directory for extraction
-            $tempDir = sys_get_temp_dir() . '/theme_upload_' . uniqid();
-            mkdir($tempDir, 0755, true);
-            
-            // Extract ZIP
-            $zip = new ZipArchive();
-            if ($zip->open($zipFile['tmp_name']) === TRUE) {
-                $zip->extractTo($tempDir);
-                $zip->close();
-                
-                // Find theme directory (look for style.css)
-                $themeDir = null;
-                $directories = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($tempDir),
-                    RecursiveIteratorIterator::SELF_FIRST
-                );
-                
-                foreach ($directories as $file) {
-                    if ($file->isFile() && $file->getFilename() === 'style.css') {
-                        $themeDir = $file->getPath();
-                        break;
-                    }
+            // Helper to clean temp directories quietly
+            $cleanupTempDirectory = static function (string $directory): void {
+                if (!is_dir($directory)) {
+                    return;
                 }
-                
-                if ($themeDir && file_exists($themeDir . '/style.css')) {
-                    // Read theme info
-                    $styleContent = file_get_contents($themeDir . '/style.css');
-                    preg_match('/Theme Name:\s*(.+)/i', $styleContent, $nameMatch);
-                    preg_match('/Description:\s*(.+)/i', $styleContent, $descMatch);
-                    preg_match('/Version:\s*(.+)/i', $styleContent, $versionMatch);
-                    
-                    $themeName = trim($nameMatch[1] ?? 'Unknown Theme');
-                    $themeDesc = trim($descMatch[1] ?? '');
-                    $themeVersion = trim($versionMatch[1] ?? '1.0');
-                    $themeSlug = preg_replace('/[^a-z0-9_-]/i', '', strtolower($themeName));
-                    $themeSlug = preg_replace('/\s+/', '-', $themeSlug);
-                    
-                    // Check if theme already exists
-                    $exists = $pdo->prepare("SELECT id FROM cms_themes WHERE slug=?");
-                    $exists->execute([$themeSlug]);
-                    
-                    if ($exists->fetch()) {
-                        $error = "Theme '{$themeName}' is already installed.";
-                    } else {
-                        // Move theme to themes directory
-                        $themesDir = dirname(__DIR__) . '/themes/' . $themeSlug;
-                        if (!is_dir($themesDir)) {
-                            mkdir($themesDir, 0755, true);
-                        }
-                        
-                        // Copy all files
-                        $iterator = new RecursiveIteratorIterator(
-                            new RecursiveDirectoryIterator($themeDir, RecursiveDirectoryIterator::SKIP_DOTS),
-                            RecursiveIteratorIterator::SELF_FIRST
-                        );
-                        
-                        foreach ($iterator as $item) {
-                            $destPath = $themesDir . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
-                            if ($item->isDir()) {
-                                if (!is_dir($destPath)) {
-                                    mkdir($destPath, 0755, true);
-                                }
-                            } else {
-                                copy($item, $destPath);
-                            }
-                        }
-                        
-                        // Install to database
-                        $defaultConfig = json_encode([
-                            'primary_color' => '#f39c12',
-                            'secondary_color' => '#34495e'
-                        ]);
-                        
-                        $versionColExists = false;
-                        try {
-                            $colCheck = $pdo->query("SHOW COLUMNS FROM cms_themes LIKE 'version'");
-                            $versionColExists = $colCheck->rowCount() > 0;
-                        } catch (Exception $e) {}
-                        
-                        if ($versionColExists) {
-                            $pdo->prepare("INSERT INTO cms_themes (name, slug, description, version, config, is_active) VALUES (?, ?, ?, ?, ?, 0)")
-                                ->execute([$themeName, $themeSlug, $themeDesc, $themeVersion, $defaultConfig]);
-                        } else {
-                            $pdo->prepare("INSERT INTO cms_themes (name, slug, description, config, is_active) VALUES (?, ?, ?, ?, 0)")
-                                ->execute([$themeName, $themeSlug, $themeDesc, $defaultConfig]);
-                        }
-                        
-                        $message = "Theme '{$themeName}' uploaded and installed successfully!";
-                    }
-                } else {
-                    $error = 'Invalid theme structure. Theme must contain a style.css file.';
-                }
-                
-                // Clean up temp directory
                 $files = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($tempDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                    new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS),
                     RecursiveIteratorIterator::CHILD_FIRST
                 );
-                foreach ($files as $fileinfo) {
-                    $todo = ($fileinfo->isDir() ? 'rmdir' : 'unlink');
-                    $todo($fileinfo->getRealPath());
+                foreach ($files as $fileInfo) {
+                    $path = $fileInfo->getRealPath();
+                    if ($fileInfo->isDir()) {
+                        @rmdir($path);
+                    } else {
+                        @unlink($path);
+                    }
                 }
-                rmdir($tempDir);
+                @rmdir($directory);
+            };
+
+            // Create temp directory for extraction
+            $tempDir = sys_get_temp_dir() . '/theme_upload_' . uniqid('', true);
+            if (!is_dir($tempDir) && !@mkdir($tempDir, 0755, true)) {
+                $error = 'Unable to prepare a temporary directory for the uploaded theme. Please check server permissions.';
             } else {
-                $error = 'Failed to extract ZIP file.';
+                // Extract ZIP
+                $zip = new ZipArchive();
+                if ($zip->open($zipFile['tmp_name']) === true) {
+                    $zip->extractTo($tempDir);
+                    $zip->close();
+                    
+                    // Find theme directory (look for style.css)
+                    $themeDir = null;
+                    $directories = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator($tempDir),
+                        RecursiveIteratorIterator::SELF_FIRST
+                    );
+                    
+                    foreach ($directories as $file) {
+                        if ($file->isFile() && $file->getFilename() === 'style.css') {
+                            $themeDir = $file->getPath();
+                            break;
+                        }
+                    }
+                    
+                    if ($themeDir && file_exists($themeDir . '/style.css')) {
+                        // Read theme info
+                        $styleContent = file_get_contents($themeDir . '/style.css');
+                        preg_match('/Theme Name:\s*(.+)/i', $styleContent, $nameMatch);
+                        preg_match('/Description:\s*(.+)/i', $styleContent, $descMatch);
+                        preg_match('/Version:\s*(.+)/i', $styleContent, $versionMatch);
+                        
+                        $themeName = trim($nameMatch[1] ?? 'Unknown Theme');
+                        $themeDesc = trim($descMatch[1] ?? '');
+                        $themeVersion = trim($versionMatch[1] ?? '1.0');
+                        $themeSlug = preg_replace('/[^a-z0-9_-]/i', '', strtolower($themeName));
+                        $themeSlug = preg_replace('/\s+/', '-', $themeSlug);
+                        
+                        // Check if theme already exists
+                        $exists = $pdo->prepare("SELECT id FROM cms_themes WHERE slug=?");
+                        $exists->execute([$themeSlug]);
+                        
+                        if ($exists->fetch()) {
+                            $error = "Theme '{$themeName}' is already installed.";
+                        } else {
+                            $themesRoot = dirname(__DIR__) . '/themes';
+
+                            if (!is_dir($themesRoot)) {
+                                if (!@mkdir($themesRoot, 0755, true)) {
+                                    $error = 'Themes directory is missing and could not be created. Please ensure the `cms/themes` folder exists and is writable.';
+                                }
+                            }
+
+                            if (empty($error) && (!is_dir($themesRoot) || !is_writable($themesRoot))) {
+                                $error = 'The themes directory is not writable. Update permissions so new themes can be installed.';
+                            }
+
+                            if (empty($error)) {
+                                $themesDir = $themesRoot . '/' . $themeSlug;
+                                if (!is_dir($themesDir) && !@mkdir($themesDir, 0755, true)) {
+                                    $error = 'Failed to create the destination folder for the new theme. Please verify file permissions.';
+                                }
+                            }
+
+                            if (empty($error)) {
+                                // Copy all files
+                                $iterator = new RecursiveIteratorIterator(
+                                    new RecursiveDirectoryIterator($themeDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                                    RecursiveIteratorIterator::SELF_FIRST
+                                );
+
+                                foreach ($iterator as $item) {
+                                    $subPath = $iterator->getSubPathName();
+                                    $destPath = $themesDir . DIRECTORY_SEPARATOR . $subPath;
+
+                                    if ($item->isDir()) {
+                                        if (!is_dir($destPath) && !@mkdir($destPath, 0755, true)) {
+                                            $error = 'Failed to create folder `' . $subPath . '` inside the themes directory. Please review permissions.';
+                                            break;
+                                        }
+                                        continue;
+                                    }
+
+                                    $destDir = dirname($destPath);
+                                    if (!is_dir($destDir) && !@mkdir($destDir, 0755, true)) {
+                                        $error = 'Failed to create folder `' . $subPath . '` inside the themes directory. Please review permissions.';
+                                        break;
+                                    }
+
+                                    if (!@copy($item->getPathname(), $destPath)) {
+                                        $error = 'Failed to copy `' . $item->getFilename() . '` into the themes directory. Ensure it is writable.';
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (empty($error)) {
+                                // Install to database
+                                $defaultConfig = json_encode([
+                                    'primary_color' => '#f39c12',
+                                    'secondary_color' => '#34495e'
+                                ]);
+
+                                $versionColExists = false;
+                                try {
+                                    $colCheck = $pdo->query("SHOW COLUMNS FROM cms_themes LIKE 'version'");
+                                    $versionColExists = $colCheck->rowCount() > 0;
+                                } catch (Exception $e) {}
+
+                                if ($versionColExists) {
+                                    $pdo->prepare("INSERT INTO cms_themes (name, slug, description, version, config, is_active) VALUES (?, ?, ?, ?, ?, 0)")
+                                        ->execute([$themeName, $themeSlug, $themeDesc, $themeVersion, $defaultConfig]);
+                                } else {
+                                    $pdo->prepare("INSERT INTO cms_themes (name, slug, description, config, is_active) VALUES (?, ?, ?, ?, 0)")
+                                        ->execute([$themeName, $themeSlug, $themeDesc, $defaultConfig]);
+                                }
+
+                                $message = "Theme '{$themeName}' uploaded and installed successfully!";
+                            } else {
+                                // Clean up partially copied destination on failure
+                                if (!empty($themesDir) && is_dir($themesDir)) {
+                                    $cleanupTempDirectory($themesDir);
+                                }
+                            }
+                        }
+                    } else {
+                        $error = 'Invalid theme structure. Theme must contain a style.css file.';
+                    }
+                    
+                    // Clean up temp directory
+                    $cleanupTempDirectory($tempDir);
+                } else {
+                    $error = $error ?: 'Failed to extract ZIP file.';
+                    $cleanupTempDirectory($tempDir);
+                }
             }
         }
     }
@@ -349,11 +399,7 @@ if ($themeId && $action === 'customize') {
 
 $configStmt = $pdo->query("SELECT config_value FROM system_config WHERE config_key='company_name'");
 $companyName = $configStmt->fetchColumn() ?: 'CMS Admin';
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_url();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -367,46 +413,299 @@ if (defined('APP_URL')) {
     include 'header.php'; 
     ?>
     <style>
-        .theme-card { background: white; border: 2px solid #c3c4c7; padding: 20px; border-radius: 4px; transition: all 0.2s; }
-        .theme-card:hover { border-color: #2271b1; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .theme-card.active { border-color: #2271b1; background: #f0f9ff; }
-        .color-picker { width: 100%; height: 40px; border: 1px solid #c3c4c7; border-radius: 4px; cursor: pointer; }
-        .config-preview { padding: 20px; background: #f6f7f7; border-radius: 4px; margin-top: 20px; }
-        .config-section { margin-bottom: 30px; }
-        .config-section h3 { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #c3c4c7; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px; }
-        .color-input-group { display: flex; gap: 10px; align-items: center; }
-        .color-input-group input[type="color"] { width: 60px; height: 40px; border: 1px solid #c3c4c7; border-radius: 4px; }
-        .color-input-group input[type="text"] { flex: 1; }
+        /* Enhanced Theme Cards */
+        .theme-card { 
+            background: white; 
+            border: 2px solid #c3c4c7; 
+            padding: 0; 
+            border-radius: 12px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            position: relative;
+        }
+        .theme-card:hover { 
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            border-color: var(--admin-primary, #2563eb);
+        }
+        .theme-card.active { 
+            border-color: var(--admin-primary, #2563eb); 
+            border-width: 3px;
+            box-shadow: 0 4px 16px var(--admin-primary-lighter, rgba(37, 99, 235, 0.2));
+        }
+        .theme-card.active::before {
+            content: '✓';
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--admin-primary, #2563eb);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .theme-preview {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        .theme-preview::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect fill="%23ffffff" opacity="0.1" width="400" height="300"/><path d="M0 150 L400 150" stroke="%23ffffff" stroke-width="2" opacity="0.2"/><path d="M200 0 L200 300" stroke="%23ffffff" stroke-width="2" opacity="0.2"/></svg>');
+            background-size: cover;
+        }
+        .theme-info {
+            padding: 20px;
+        }
+        .theme-info h3 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #1d2327;
+        }
+        .theme-info p {
+            color: #646970;
+            font-size: 13px;
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+        .theme-meta {
+            display: flex;
+            gap: 12px;
+            margin: 12px 0;
+            font-size: 12px;
+            color: #646970;
+        }
+        .theme-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .theme-actions {
+            padding: 0 20px 20px 20px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .theme-actions .button {
+            flex: 1;
+            min-width: 120px;
+        }
+        
+        /* Enhanced Color Picker */
+        .color-picker { 
+            width: 100%; 
+            height: 50px; 
+            border: 2px solid #c3c4c7; 
+            border-radius: 8px; 
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .color-picker:hover {
+            border-color: var(--admin-primary, #2563eb);
+            transform: scale(1.05);
+        }
+        .config-preview { 
+            padding: 30px; 
+            background: #f6f7f7; 
+            border-radius: 12px; 
+            margin-top: 30px;
+            border: 2px solid #c3c4c7;
+            transition: all 0.3s;
+        }
+        .config-section { 
+            margin-bottom: 40px;
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid #c3c4c7;
+        }
+        .config-section h3 { 
+            margin: 0 0 20px 0; 
+            padding-bottom: 15px; 
+            border-bottom: 3px solid var(--admin-primary, #2563eb);
+            font-size: 20px;
+            font-weight: 700;
+            color: #1d2327;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .form-row { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
+            gap: 24px; 
+            margin-bottom: 20px; 
+        }
+        .color-input-group { 
+            display: flex; 
+            gap: 12px; 
+            align-items: center;
+            background: #f6f7f7;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #c3c4c7;
+        }
+        .color-input-group input[type="color"] { 
+            width: 70px; 
+            height: 50px; 
+            border: 2px solid #c3c4c7; 
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .color-input-group input[type="color"]:hover {
+            border-color: var(--admin-primary, #2563eb);
+            transform: scale(1.1);
+        }
+        .color-input-group input[type="text"] { 
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #c3c4c7;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .color-input-group input[type="text"]:focus {
+            outline: none;
+            border-color: var(--admin-primary, #2563eb);
+            box-shadow: 0 0 0 3px var(--admin-primary-lighter, rgba(37, 99, 235, 0.1));
+        }
+        
+        /* Search and Filter */
+        .theme-search-bar {
+            background: white;
+            border: 1px solid #c3c4c7;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .theme-search-bar input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #c3c4c7;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .theme-search-bar input:focus {
+            outline: none;
+            border-color: var(--admin-primary, #2563eb);
+            box-shadow: 0 0 0 3px var(--admin-primary-lighter, rgba(37, 99, 235, 0.1));
+        }
+        
+        /* Enhanced Upload Section */
+        .upload-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            color: white;
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        }
+        .upload-section h3 {
+            color: white;
+            margin: 0 0 12px 0;
+        }
+        .upload-section p {
+            color: rgba(255, 255, 255, 0.9);
+            margin: 8px 0;
+        }
+        .upload-section input[type="file"] {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+        }
+        
+        /* Responsive Grid */
+        .themes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 24px;
+            margin-top: 24px;
+        }
+        
+        @media (max-width: 768px) {
+            .themes-grid {
+                grid-template-columns: 1fr;
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Live Preview Enhancements */
+        .live-preview-container {
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
     <?php include 'footer.php'; ?>
     
     <div class="wrap">
-        <h1>Appearance</h1>
+        <div class="admin-page-header">
+            <h1>🎨 Appearance</h1>
+            <p>Customize your website's look and feel with themes, colors, and styling options.</p>
+        </div>
         
-        <div class="nav-tab-wrapper" style="margin-bottom: 20px; border-bottom: 1px solid #c3c4c7;">
+        <div class="nav-tab-wrapper" style="margin-bottom: 24px; border-bottom: 2px solid #c3c4c7; background: white; padding: 0 20px; border-radius: 12px 12px 0 0;">
             <a href="appearance.php" class="nav-tab <?php echo $action === 'list' || !$action ? 'nav-tab-active' : ''; ?>">Themes</a>
             <a href="menus.php" class="nav-tab">Menus</a>
             <a href="widgets.php" class="nav-tab">Widgets</a>
         </div>
         
         <?php if ($message): ?>
-            <div class="notice notice-success"><p><?php echo htmlspecialchars($message); ?></p></div>
+            <div class="admin-notice admin-notice-success">
+                <span class="admin-notice-icon">✓</span>
+                <div class="admin-notice-content">
+                    <strong>Success!</strong>
+                    <p><?php echo htmlspecialchars($message); ?></p>
+                </div>
+            </div>
         <?php endif; ?>
         <?php if ($error): ?>
-            <div class="notice notice-error"><p><?php echo htmlspecialchars($error); ?></p></div>
+            <div class="admin-notice admin-notice-error">
+                <span class="admin-notice-icon">⚠</span>
+                <div class="admin-notice-content">
+                    <strong>Error</strong>
+                    <p><?php echo htmlspecialchars($error); ?></p>
+                </div>
+            </div>
         <?php endif; ?>
         
         <?php if ($action === 'customize' && $theme): ?>
-            <div style="margin-bottom: 20px;">
-                <a href="appearance.php" class="button">← Back to Themes</a>
-                <h2 style="margin-top: 20px;">Customize: <?php echo htmlspecialchars($theme['name']); ?></h2>
-                <p><?php echo htmlspecialchars($theme['description'] ?? ''); ?></p>
+            <div class="admin-card" style="margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+                    <a href="appearance.php" class="admin-btn admin-btn-outline">← Back to Themes</a>
+                    <div style="flex: 1;">
+                        <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 700; color: #1d2327;">Customize: <?php echo htmlspecialchars($theme['name']); ?></h2>
+                        <p style="margin: 0; color: #646970;"><?php echo htmlspecialchars($theme['description'] ?? ''); ?></p>
+                    </div>
+                </div>
             </div>
             
-            <form method="post" class="post-form" style="background: white; padding: 20px; border: 1px solid #c3c4c7;">
+            <form method="post" class="admin-form">
                 <input type="hidden" name="theme_id" value="<?php echo $theme['id']; ?>">
                 
                 <div class="config-section">
@@ -568,10 +867,10 @@ if (defined('APP_URL')) {
                     </div>
                 </div>
                 
-                <p class="submit" style="margin-top: 30px;">
-                    <input type="submit" name="save_theme_config" class="button button-primary" value="Save Changes">
-                    <a href="appearance.php" class="button">Cancel</a>
-                </p>
+                <div style="margin-top: 30px; padding-top: 24px; border-top: 2px solid #c3c4c7; display: flex; gap: 12px; justify-content: flex-end;">
+                    <a href="appearance.php" class="admin-btn admin-btn-outline">Cancel</a>
+                    <button type="submit" name="save_theme_config" class="admin-btn admin-btn-primary">Save Changes</button>
+                </div>
             </form>
             
             <script>
@@ -628,79 +927,147 @@ if (defined('APP_URL')) {
                 });
             </script>
         <?php else: ?>
-            <div style="background: #fff3cd; border: 1px solid #ffc107; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0;">
-                <h3 style="margin-top: 0;">🎨 Theme Converter</h3>
-                <p style="margin: 10px 0; color: #856404;">
-                    Convert any HTML template or WordPress theme into a usable CMS theme automatically!
-                </p>
-                <a href="theme-converter.php" class="button button-primary">Open Theme Converter →</a>
+            <!-- Theme Converter Banner -->
+            <div class="admin-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+                    <div>
+                        <h3 style="margin: 0 0 8px 0; color: white; font-size: 20px;">🎨 Theme Converter</h3>
+                        <p style="margin: 0; color: rgba(255, 255, 255, 0.95);">Convert any HTML template or WordPress theme into a usable CMS theme automatically!</p>
+                    </div>
+                    <a href="theme-converter.php" class="admin-btn" style="background: white; color: #f5576c; border: none; font-weight: 700;">Open Theme Converter →</a>
+                </div>
             </div>
             
-            <h2>Installed Themes</h2>
-            <p>Customize the appearance of your site. Click "Customize" to edit theme colors, fonts, and styles.</p>
-            
-            <!-- Theme Upload Form -->
-            <div style="background: #fff; border: 1px solid #c3c4c7; border-left: 4px solid #2271b1; padding: 15px; margin: 20px 0;">
-                <h3 style="margin-top: 0;">📦 Upload Theme</h3>
-                <p style="margin: 10px 0; color: #646970;">Upload a theme ZIP file to install it. The theme must contain a style.css file with theme information.</p>
-                <form method="post" enctype="multipart/form-data" style="margin-top: 15px;">
-                    <div style="display: flex; gap: 10px; align-items: flex-end;">
-                        <div style="flex: 1;">
-                            <input type="file" name="theme_zip" accept=".zip" required style="padding: 8px; border: 1px solid #8c8f94; border-radius: 4px; width: 100%;">
-                            <small style="color: #646970; display: block; margin-top: 5px;">Maximum file size: 50MB. Theme ZIP must contain a style.css file.</small>
+            <!-- Theme Upload Section -->
+            <div class="upload-section">
+                <h3>📦 Upload New Theme</h3>
+                <p>Upload a theme ZIP file to install it. The theme must contain a style.css file with theme information.</p>
+                <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
+                    <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 250px;">
+                            <input type="file" name="theme_zip" accept=".zip" required style="padding: 12px; border-radius: 8px; width: 100%; background: white; border: none; cursor: pointer;">
+                            <small style="color: rgba(255, 255, 255, 0.9); display: block; margin-top: 8px;">Maximum file size: 50MB. Theme ZIP must contain a style.css file.</small>
                         </div>
-                        <button type="submit" name="upload_theme" class="button button-primary">Upload & Install Theme</button>
+                        <button type="submit" name="upload_theme" class="admin-btn" style="background: white; color: #667eea; border: none; font-weight: 700; padding: 12px 24px;">Upload & Install</button>
                     </div>
                 </form>
             </div>
             
+            <!-- Search Bar -->
+            <div class="theme-search-bar">
+                <input type="text" id="theme-search" placeholder="🔍 Search themes by name or description..." onkeyup="filterThemes()">
+            </div>
+            
+            <div class="admin-card-header">
+                <h2>Installed Themes</h2>
+                <span class="admin-badge admin-badge-active"><?php echo count($themes); ?> Theme<?php echo count($themes) !== 1 ? 's' : ''; ?></span>
+            </div>
+            <p style="color: #646970; margin-bottom: 24px;">Customize the appearance of your site. Click "Customize" to edit theme colors, fonts, and styles.</p>
+            
             <?php if (!empty($uninstalledThemes)): ?>
-                <div style="background: #fff; border: 1px solid #c3c4c7; border-left: 4px solid #2271b1; padding: 15px; margin: 20px 0;">
-                    <h3 style="margin-top: 0;">Available Themes to Install</h3>
-                    <p>These themes are available in your themes directory but not yet installed:</p>
-                    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:20px; margin-top:15px;">
+                <div class="admin-card" style="margin-bottom: 24px; border-left: 4px solid var(--admin-primary, #2563eb);">
+                    <div class="admin-card-header">
+                        <h2>Available Themes to Install</h2>
+                        <span class="admin-badge admin-badge-pending"><?php echo count($uninstalledThemes); ?> Available</span>
+                    </div>
+                    <p style="color: #646970; margin-bottom: 16px;">These themes are available in your themes directory but not yet installed:</p>
+                    <div class="themes-grid">
                         <?php foreach ($uninstalledThemes as $theme): ?>
-                            <div style="background: #f6f7f7; border: 1px solid #c3c4c7; padding: 15px; border-radius: 4px;">
-                                <h4 style="margin-top: 0;"><?php echo htmlspecialchars($theme['name']); ?></h4>
-                                <p style="color: #646970; font-size: 13px; margin: 5px 0;"><?php echo htmlspecialchars($theme['description']); ?></p>
-                                <p style="color: #646970; font-size: 12px; margin: 5px 0;"><strong>Version:</strong> <?php echo htmlspecialchars($theme['version']); ?></p>
-                                <form method="post" style="margin-top: 10px;">
-                                    <input type="hidden" name="theme_slug" value="<?php echo htmlspecialchars($theme['slug']); ?>">
-                                    <input type="submit" name="install_theme" value="Install Theme" class="button button-primary">
-                                </form>
+                            <div class="theme-card">
+                                <div class="theme-preview"></div>
+                                <div class="theme-info">
+                                    <h3><?php echo htmlspecialchars($theme['name']); ?></h3>
+                                    <p><?php echo htmlspecialchars($theme['description']); ?></p>
+                                    <div class="theme-meta">
+                                        <span>📦 v<?php echo htmlspecialchars($theme['version']); ?></span>
+                                        <span>📁 <?php echo htmlspecialchars($theme['slug']); ?></span>
+                                    </div>
+                                </div>
+                                <div class="theme-actions">
+                                    <form method="post" style="width: 100%;">
+                                        <input type="hidden" name="theme_slug" value="<?php echo htmlspecialchars($theme['slug']); ?>">
+                                        <button type="submit" name="install_theme" class="admin-btn admin-btn-primary" style="width: 100%;">Install Theme</button>
+                                    </form>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>
                 </div>
             <?php endif; ?>
             
-            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:20px; margin-top:20px;">
-                <?php foreach ($themes as $theme): ?>
-                    <div class="theme-card <?php echo $theme['is_active'] ? 'active' : ''; ?>">
-                        <h3 style="margin-top: 0;"><?php echo htmlspecialchars($theme['name']); ?></h3>
-                        <p style="color: #646970; font-size: 13px; margin: 10px 0;"><?php echo htmlspecialchars($theme['description'] ?? ''); ?></p>
-                        
-                        <?php if ($theme['is_active']): ?>
-                            <p style="margin: 15px 0;"><strong style="color:#00a32a;">✓ Active Theme</strong></p>
-                            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                                <a href="?action=customize&theme_id=<?php echo $theme['id']; ?>" class="button button-primary">Customize</a>
+            <div class="themes-grid" id="themes-container">
+                <?php foreach ($themes as $theme): 
+                    $config = json_decode($theme['config'] ?? '{}', true);
+                    $primaryColor = $config['primary_color'] ?? '#0ea5e9';
+                ?>
+                    <div class="theme-card <?php echo $theme['is_active'] ? 'active' : ''; ?>" data-theme-name="<?php echo strtolower(htmlspecialchars($theme['name'])); ?>" data-theme-desc="<?php echo strtolower(htmlspecialchars($theme['description'] ?? '')); ?>">
+                        <div class="theme-preview" style="background: linear-gradient(135deg, <?php echo $primaryColor; ?> 0%, <?php echo $config['secondary_color'] ?? '#64748b'; ?> 100%);"></div>
+                        <div class="theme-info">
+                            <h3><?php echo htmlspecialchars($theme['name']); ?></h3>
+                            <p><?php echo htmlspecialchars($theme['description'] ?? 'No description available.'); ?></p>
+                            <div class="theme-meta">
+                                <?php if (!empty($theme['version'])): ?>
+                                    <span>📦 v<?php echo htmlspecialchars($theme['version']); ?></span>
+                                <?php endif; ?>
+                                <span>🎨 <?php echo htmlspecialchars($theme['slug']); ?></span>
                             </div>
-                        <?php else: ?>
-                            <form method="post" style="display: inline; width: 100%;">
-                                <input type="hidden" name="theme_id" value="<?php echo $theme['id']; ?>">
-                                <input type="submit" name="activate_theme" value="Activate" class="button button-primary" style="width: 100%;">
-                            </form>
-                            <div style="display: flex; gap: 5px; margin-top: 10px;">
-                                <a href="?action=customize&theme_id=<?php echo $theme['id']; ?>" class="button" style="flex: 1; text-align: center;">Customize</a>
-                                <form method="post" style="display: inline; flex: 1;" onsubmit="return confirm('Are you sure you want to delete this theme? This will remove it from the database but not delete the theme files.');">
+                        </div>
+                        <div class="theme-actions">
+                            <?php if ($theme['is_active']): ?>
+                                <span class="admin-badge admin-badge-active" style="width: 100%; text-align: center; margin-bottom: 12px;">✓ Active Theme</span>
+                                <a href="?action=customize&theme_id=<?php echo $theme['id']; ?>" class="admin-btn admin-btn-primary" style="width: 100%;">Customize</a>
+                            <?php else: ?>
+                                <form method="post" style="width: 100%;">
                                     <input type="hidden" name="theme_id" value="<?php echo $theme['id']; ?>">
-                                    <input type="submit" name="delete_theme" value="Delete" class="button" style="width: 100%; background: #dc3232; color: white; border-color: #dc3232;">
+                                    <button type="submit" name="activate_theme" class="admin-btn admin-btn-primary" style="width: 100%;">Activate</button>
                                 </form>
-                            </div>
-                        <?php endif; ?>
+                                <div style="display: flex; gap: 8px; margin-top: 8px; width: 100%;">
+                                    <a href="?action=customize&theme_id=<?php echo $theme['id']; ?>" class="admin-btn admin-btn-outline" style="flex: 1; text-align: center;">Customize</a>
+                                    <form method="post" style="flex: 1;" onsubmit="return confirm('Are you sure you want to delete this theme? This will remove it from the database but not delete the theme files.');">
+                                        <input type="hidden" name="theme_id" value="<?php echo $theme['id']; ?>">
+                                        <button type="submit" name="delete_theme" class="admin-btn admin-btn-danger" style="width: 100%;">Delete</button>
+                                    </form>
+                                </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 <?php endforeach; ?>
             </div>
+            
+            <script>
+                function filterThemes() {
+                    const search = document.getElementById('theme-search').value.toLowerCase();
+                    const cards = document.querySelectorAll('.theme-card');
+                    let visibleCount = 0;
+                    
+                    cards.forEach(card => {
+                        const name = card.getAttribute('data-theme-name') || '';
+                        const desc = card.getAttribute('data-theme-desc') || '';
+                        const matches = name.includes(search) || desc.includes(search);
+                        
+                        if (matches || search === '') {
+                            card.style.display = 'block';
+                            visibleCount++;
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                    
+                    // Show message if no results
+                    let noResultsMsg = document.getElementById('no-results');
+                    if (visibleCount === 0 && search !== '') {
+                        if (!noResultsMsg) {
+                            noResultsMsg = document.createElement('div');
+                            noResultsMsg.id = 'no-results';
+                            noResultsMsg.className = 'admin-empty-state';
+                            noResultsMsg.innerHTML = '<div class="admin-empty-state-icon">🔍</div><h3>No themes found</h3><p>Try a different search term.</p>';
+                            document.getElementById('themes-container').appendChild(noResultsMsg);
+                        }
+                    } else if (noResultsMsg) {
+                        noResultsMsg.remove();
+                    }
+                }
+            </script>
         <?php endif; ?>
     </div>
 </body>

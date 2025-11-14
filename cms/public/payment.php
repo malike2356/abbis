@@ -215,11 +215,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['process_payment'])) {
             } else {
                 // For non-gateway payments (mobile money, cash, bank transfer)
                 // Mark as completed (in production, verify with external system)
+                $transactionId = 'TXN-' . time();
                 $pdo->prepare("UPDATE cms_payments SET status='completed', transaction_id=? WHERE order_id=?")
-                    ->execute(['TXN-' . time(), $order['id']]);
+                    ->execute([$transactionId, $order['id']]);
                 
                 $pdo->prepare("UPDATE cms_orders SET status='processing' WHERE id=?")
                     ->execute([$order['id']]);
+                
+                // Automatically track CMS payment in accounting
+                try {
+                    require_once $rootPath . '/includes/AccountingAutoTracker.php';
+                    $accountingTracker = new AccountingAutoTracker($pdo);
+                    $accountingTracker->trackCMSPayment($payment['id'], [
+                        'order_number' => $orderNumber,
+                        'amount' => floatval($payment['amount'] ?? $order['total_amount']),
+                        'payment_method' => $payment['method_name'] ?? $payment['provider'] ?? 'cash',
+                        'payment_date' => date('Y-m-d'),
+                        'created_by' => $_SESSION['user_id'] ?? null
+                    ]);
+                } catch (Exception $e) {
+                    error_log("Accounting auto-tracking error for CMS payment: " . $e->getMessage());
+                }
                 
                 header('Location: ' . $baseUrl . '/cms/order-confirmation?order=' . urlencode($orderNumber));
                 exit;
@@ -242,7 +258,6 @@ if (!isset($companyName) || empty($companyName)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Payment - <?php echo htmlspecialchars($companyName); ?></title>
-    <?php include __DIR__ . '/header.php'; ?>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; }

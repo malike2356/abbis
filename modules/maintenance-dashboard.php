@@ -3,8 +3,16 @@
  * Maintenance Dashboard
  * Overview of maintenance activities and statistics
  */
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('resources.access');
+
 $pdo = getDBConnection();
-$currentUserId = $_SESSION['user_id'];
+$currentUserId = $_SESSION['user_id'] ?? null;
 
 // Get maintenance statistics
 $stats = [

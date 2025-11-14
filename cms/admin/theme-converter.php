@@ -48,11 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['convert_theme']) && i
 
 $configStmt = $pdo->query("SELECT config_value FROM system_config WHERE config_key='company_name'");
 $companyName = $configStmt->fetchColumn() ?: 'CMS Admin';
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_url();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -65,247 +61,354 @@ if (defined('APP_URL')) {
     include 'header.php'; 
     ?>
     <style>
-        .converter-container {
-            max-width: 1200px;
-            margin: 0 auto;
+        :root {
+            --converter-bg: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+            --card-bg: rgba(255,255,255,0.96);
+            --accent: #6366f1;
+            --accent-strong: #0ea5e9;
         }
-        .upload-area {
-            background: #fff;
-            border: 2px dashed #c3c4c7;
-            border-radius: 8px;
+        body.cms-admin{
+            background: #f1f5f9;
+        }
+        .converter-hero {
+            background: var(--converter-bg);
+            border-radius: 24px;
             padding: 40px;
-            text-align: center;
-            margin: 20px 0;
-            transition: all 0.3s;
+            color: #fff;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 40px 80px -60px rgba(14,165,233,0.7);
+            margin-bottom: 36px;
         }
-        .upload-area:hover {
-            border-color: #2271b1;
-            background: #f0f6fc;
+        .converter-hero::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top left, rgba(255,255,255,0.28), transparent 45%);
+            pointer-events: none;
         }
-        .upload-area.dragover {
-            border-color: #2271b1;
-            background: #e7f3ff;
+        .converter-hero h1 {
+            margin: 0;
+            font-size: 2.4rem;
+            font-weight: 700;
         }
-        .conversion-result {
-            background: #fff;
-            border: 1px solid #c3c4c7;
-            border-left: 4px solid #00a32a;
-            padding: 20px;
-            margin: 20px 0;
-            border-radius: 4px;
+        .converter-hero p {
+            font-size: 1.05rem;
+            max-width: 620px;
+            margin: 12px 0 0;
+            opacity: 0.92;
         }
-        .conversion-info {
-            background: #f6f7f7;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 13px;
-        }
-        .features-list {
+        .converter-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
+            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         }
-        .feature-card {
-            background: #fff;
-            border: 1px solid #c3c4c7;
-            padding: 20px;
-            border-radius: 4px;
+        .converter-card {
+            background: var(--card-bg);
+            border-radius: 18px;
+            padding: 26px;
+            box-shadow: 0 20px 48px -28px rgba(15,23,42,0.18);
+            border: 1px solid rgba(14,165,233,0.08);
+            backdrop-filter: blur(12px);
         }
-        .feature-card h3 {
+        .converter-card h2 {
             margin-top: 0;
-            color: #2271b1;
+            font-size: 1.35rem;
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+        }
+        .feature-item {
+            background: rgba(99,102,241,0.08);
+            border-radius: 14px;
+            padding: 18px;
+            border: 1px solid rgba(99,102,241,0.16);
+        }
+        .feature-item h3 {
+            margin: 0 0 8px;
+            font-size: 1rem;
+            color: var(--accent);
+        }
+        .upload-dropzone {
+            border: 2px dashed rgba(99,102,241,0.45);
+            border-radius: 20px;
+            padding: 48px 32px;
+            text-align: center;
+            background: rgba(255,255,255,0.95);
+            transition: border-color 0.3s ease, background 0.3s ease, transform 0.2s ease;
+        }
+        .upload-dropzone:hover {
+            border-color: rgba(14,165,233,0.65);
+            background: rgba(224,242,254,0.85);
+            transform: translateY(-2px);
+        }
+        .upload-dropzone.dragover {
+            border-color: rgba(14,165,233,0.75);
+            background: rgba(224,242,254,0.95);
+        }
+        .upload-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .summary-card {
+            background: rgba(14,165,233,0.08);
+            border-left: 4px solid var(--accent);
+            padding: 18px;
+            border-radius: 14px;
+            margin-top: 18px;
+        }
+        .conversion-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        .conversion-table th,
+        .conversion-table td {
+            padding: 10px;
+            border-bottom: 1px solid rgba(148,163,184,0.25);
+            text-align: left;
+            font-size: 0.95rem;
+        }
+        .conversion-steps ol {
+            padding-left: 22px;
+            line-height: 1.7;
+            color: #1f2937;
+        }
+        .conversion-steps li strong {
+            color: var(--accent);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(15,118,110,0.1);
+            color: #0f766e;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
             font-weight: 600;
-            margin: 5px 0;
         }
-        .status-success { background: #00a32a; color: white; }
-        .status-warning { background: #f0b849; color: #1e293b; }
-        .status-info { background: #2271b1; color: white; }
+        .badge.info {
+            background: rgba(99,102,241,0.12);
+            color: var(--accent);
+        }
+        .badge.success {
+            background: rgba(16,185,129,0.12);
+            color: #059669;
+        }
+        .badge.warning {
+            background: rgba(245,158,11,0.12);
+            color: #b45309;
+        }
+        .conversion-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            padding: 24px;
+        }
+        .conversion-overlay.is-visible {
+            display: flex;
+        }
+        .conversion-overlay__card {
+            background: white;
+            border-radius: 18px;
+            padding: 32px 36px;
+            width: min(420px, 100%);
+            text-align: center;
+            box-shadow: 0 30px 60px rgba(15, 23, 42, 0.25);
+        }
+        .conversion-overlay__spinner {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: 6px solid rgba(14, 165, 233, 0.25);
+            border-top-color: #0ea5e9;
+            margin: 0 auto 18px;
+            animation: converter-spin 1s linear infinite;
+        }
+        @keyframes converter-spin {
+            to { transform: rotate(360deg); }
+        }
+        body.conversion-overlay-active {
+            overflow: hidden;
+        }
     </style>
 </head>
-<body>
-    <?php include 'footer.php'; ?>
-    
-    <div class="wrap">
-        <h1>🎨 Theme Converter</h1>
-        <p>Convert any HTML template or WordPress theme into a usable CMS theme automatically.</p>
-        
+<body class="cms-admin">
+    <main class="wrap" style="padding-bottom:40px;">
+        <div class="converter-hero">
+            <h1>🎨 Theme Converter Toolkit</h1>
+            <p>Automatically transform HTML templates or WordPress themes into ABBIS-ready CMS themes. Preserve design, responsive layout, and functionality with one upload.</p>
+            <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:24px;">
+                <span class="badge info">HTML → CMS</span>
+                <span class="badge success">WordPress → CMS</span>
+                <span class="badge warning">Supports Bootstrap / Tailwind</span>
+            </div>
+        </div>
+
         <?php if ($message): ?>
             <div class="notice notice-success"><p><?php echo htmlspecialchars($message); ?></p></div>
         <?php endif; ?>
         <?php if ($error): ?>
             <div class="notice notice-error"><p><?php echo htmlspecialchars($error); ?></p></div>
         <?php endif; ?>
-        
-        <div class="converter-container">
-            <!-- Features Overview -->
-            <div style="background: #fff; border: 1px solid #c3c4c7; padding: 20px; margin: 20px 0; border-radius: 4px;">
-                <h2>✨ Conversion Features</h2>
-                <div class="features-list">
-                    <div class="feature-card">
+
+        <div class="converter-grid">
+            <section class="converter-card" aria-labelledby="converter-upload">
+                <h2 id="converter-upload">⬆️ Upload & Convert</h2>
+                <p style="color:#475569; margin-bottom:18px;">Upload a ZIP, TAR, or GZ archive. We’ll analyse the structure, detect whether it’s WordPress or static HTML, and produce a ready-to-activate CMS theme.</p>
+                <div class="upload-dropzone" id="uploadArea">
+                    <form method="post" enctype="multipart/form-data" id="uploadForm">
+                        <svg width="72" height="72" style="margin-bottom: 18px; opacity: 0.35;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <h3 style="margin: 6px 0 12px; font-size: 1.3rem;">Drop your theme package here</h3>
+                        <p style="color:#475569; margin:0 0 18px;">or click the button below to browse.</p>
+                        <div class="upload-actions">
+                            <label for="themeFile" class="button button-primary" style="cursor:pointer; padding:12px 28px; border-radius:999px;">Choose Theme File</label>
+                            <input type="file" name="theme_file" id="themeFile" accept=".zip,.tar,.gz" required style="display:none;">
+                            <div id="fileName" style="color:#0f172a; font-weight:600; min-height:24px;"></div>
+                            <small style="color:#64748b;">Max size 100 MB • HTML templates, WordPress themes, Bootstrap, Tailwind</small>
+                            <button type="submit" name="convert_theme" class="button button-primary button-large" id="convertBtn" disabled style="padding:12px 32px; border-radius:999px; margin-top:6px;">🔁 Convert Theme</button>
+                        </div>
+                    </form>
+                </div>
+                <div class="summary-card" role="status">
+                    <strong>Status Tips:</strong>
+                    <ul style="margin:12px 0 0 18px; color:#475569;">
+                        <li>Conversion handles assets, menus, and template tags automatically.</li>
+                        <li>WordPress functions like <code>the_title()</code> map to CMS-friendly equivalents.</li>
+                        <li>Converted themes appear instantly under <strong>Appearance → Themes</strong>.</li>
+                    </ul>
+                </div>
+            </section>
+
+            <section class="converter-card" aria-labelledby="converter-overview">
+                <h2 id="converter-overview">✨ What Gets Converted</h2>
+                <div class="feature-list" style="margin-bottom: 20px;">
+                    <div class="feature-item">
                         <h3>📦 HTML Templates</h3>
-                        <p>Convert any HTML template (Bootstrap, Tailwind, custom CSS) into a CMS theme</p>
+                        <p>Bootstrap, Tailwind, and custom CSS templates become CMS themes, preserving page structure.</p>
                     </div>
-                    <div class="feature-card">
+                    <div class="feature-item">
                         <h3>🔄 WordPress Themes</h3>
-                        <p>Automatically convert WordPress themes with function mapping and compatibility</p>
+                        <p>Automatically translates WordPress hooks, template tags, and menus into ABBIS equivalents.</p>
                     </div>
-                    <div class="feature-card">
+                    <div class="feature-item">
                         <h3>🎯 Function Mapping</h3>
-                        <p>Converts WordPress functions to CMS equivalents automatically</p>
+                        <p>Smart replacements for <code>the_content()</code>, <code>wp_nav_menu()</code>, <code>bloginfo()</code>, and more.</p>
                     </div>
-                    <div class="feature-card">
-                        <h3>📱 Responsive Support</h3>
-                        <p>Preserves responsive design and mobile compatibility</p>
+                    <div class="feature-item">
+                        <h3>📱 Responsive Design</h3>
+                        <p>Keeps original CSS/JS assets, ensuring responsive behavior across devices.</p>
                     </div>
-                    <div class="feature-card">
+                    <div class="feature-item">
                         <h3>🎨 Style Preservation</h3>
-                        <p>Maintains original CSS, JavaScript, and assets</p>
+                        <p>Maintains typography, colors, animations, and layout aesthetics.</p>
                     </div>
-                    <div class="feature-card">
+                    <div class="feature-item">
                         <h3>🔗 Navigation Mapping</h3>
-                        <p>Adapts navigation menus to CMS menu system</p>
+                        <p>Converts theme menus into CMS menu structures without breaking navigation.</p>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Upload Form -->
-            <div class="upload-area" id="uploadArea">
-                <form method="post" enctype="multipart/form-data" id="uploadForm">
-                    <svg width="64" height="64" style="margin-bottom: 20px; opacity: 0.5;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    <h2 style="margin: 10px 0;">Upload Theme/Template</h2>
-                    <p style="color: #646970; margin: 10px 0 20px 0;">
-                        Drag and drop your theme ZIP file here, or click to browse
-                    </p>
-                    <input type="file" name="theme_file" id="themeFile" accept=".zip,.tar,.gz" required 
-                           style="display: none;" onchange="document.getElementById('fileName').textContent = this.files[0].name">
-                    <label for="themeFile" class="button button-primary" style="cursor: pointer; display: inline-block; padding: 10px 20px;">
-                        Choose File
-                    </label>
-                    <div id="fileName" style="margin-top: 10px; color: #646970; font-weight: 600;"></div>
-                    <small style="display: block; margin-top: 15px; color: #646970;">
-                        Supported formats: ZIP, TAR, GZ<br>
-                        Maximum file size: 100MB<br>
-                        Works with: HTML templates, WordPress themes, Bootstrap themes, custom CSS themes
-                    </small>
-                    <div style="margin-top: 20px;">
-                        <button type="submit" name="convert_theme" class="button button-primary button-large" id="convertBtn" disabled>
-                            🔄 Convert Theme
-                        </button>
-                    </div>
-                </form>
-            </div>
-            
-            <!-- Conversion Result -->
-            <?php if ($conversionResult): ?>
-                <div class="conversion-result">
-                    <h2>✅ Conversion Complete!</h2>
-                    <div class="conversion-info">
-                        <div><strong>Theme Name:</strong> <?php echo htmlspecialchars($conversionResult['theme_name'] ?? 'Unknown'); ?></div>
-                        <div><strong>Theme Slug:</strong> <code><?php echo htmlspecialchars($conversionResult['theme_slug'] ?? ''); ?></code></div>
-                        <div><strong>Type Detected:</strong> 
-                            <span class="status-badge status-<?php echo ($conversionResult['is_wordpress'] ?? false) ? 'info' : 'success'; ?>">
+                <div class="conversion-steps">
+                    <h3>🔧 Workflow</h3>
+                    <ol>
+                        <li><strong>Upload</strong> a theme package (ZIP/TAR/GZ)</li>
+                        <li><strong>Analyse</strong> file structure and detect HTML vs WordPress</li>
+                        <li><strong>Convert</strong> template tags, menu calls, asset paths, and theme metadata</li>
+                        <li><strong>Install</strong> the converted theme and make it available in the CMS</li>
+                    </ol>
+                </div>
+            </section>
+        </div>
+
+        <?php if ($conversionResult): ?>
+            <section class="converter-card" style="margin-top:24px;" aria-labelledby="converter-result">
+                <h2 id="converter-result">✅ Conversion Report</h2>
+                <p style="color:#475569;">Your theme was converted successfully. Review the summary below and head to Appearance → Themes to activate it.</p>
+                <table class="conversion-table">
+                    <tr>
+                        <th>Theme Name</th>
+                        <td><?php echo htmlspecialchars($conversionResult['theme_name'] ?? 'Unknown'); ?></td>
+                    </tr>
+                    <tr>
+                        <th>Theme Slug</th>
+                        <td><code><?php echo htmlspecialchars($conversionResult['theme_slug'] ?? ''); ?></code></td>
+                    </tr>
+                    <tr>
+                        <th>Detected Type</th>
+                        <td>
+                            <span class="badge <?php echo ($conversionResult['is_wordpress'] ?? false) ? 'info' : 'success'; ?>">
                                 <?php echo ($conversionResult['is_wordpress'] ?? false) ? 'WordPress Theme' : 'HTML Template'; ?>
                             </span>
-                        </div>
-                        <div><strong>Files Converted:</strong> <?php echo $conversionResult['files_converted'] ?? 0; ?> files</div>
-                        <?php if (!empty($conversionResult['conversions'])): ?>
-                            <div style="margin-top: 15px;">
-                                <strong>Conversions Made:</strong>
-                                <ul style="margin: 10px 0 0 20px;">
-                                    <?php foreach ($conversionResult['conversions'] as $conv): ?>
-                                        <li><?php echo htmlspecialchars($conv); ?></li>
-                                    <?php endforeach; ?>
-                                </ul>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                    <div style="margin-top: 20px;">
-                        <a href="appearance.php" class="button button-primary">Go to Themes →</a>
-                        <a href="<?php echo $baseUrl; ?>/cms/" target="_blank" class="button">Preview Theme →</a>
-                    </div>
-                </div>
-            <?php endif; ?>
-            
-            <!-- How It Works -->
-            <div style="background: #fff; border: 1px solid #c3c4c7; padding: 20px; margin: 20px 0; border-radius: 4px;">
-                <h2>📖 How It Works</h2>
-                <ol style="line-height: 1.8;">
-                    <li><strong>Upload</strong> your theme/template ZIP file (HTML template, WordPress theme, or any packaged theme)</li>
-                    <li><strong>Analysis</strong> - The converter analyzes the structure and detects if it's a WordPress theme or HTML template</li>
-                    <li><strong>Conversion</strong> - Automatically converts:
-                        <ul>
-                            <li>WordPress functions to CMS equivalents</li>
-                            <li>Template tags and variables</li>
-                            <li>Navigation menus</li>
-                            <li>Asset paths</li>
-                            <li>Creates proper theme structure with style.css header</li>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Files Converted</th>
+                        <td><?php echo (int) ($conversionResult['files_converted'] ?? 0); ?></td>
+                    </tr>
+                </table>
+                <?php if (!empty($conversionResult['conversions'])): ?>
+                    <div class="summary-card" style="margin-top: 20px;">
+                        <strong>Transformations:</strong>
+                        <ul style="margin: 10px 0 0 18px;">
+                            <?php foreach ($conversionResult['conversions'] as $conv): ?>
+                                <li><?php echo htmlspecialchars($conv); ?></li>
+                            <?php endforeach; ?>
                         </ul>
-                    </li>
-                    <li><strong>Installation</strong> - Theme is automatically installed and ready to activate</li>
-                </ol>
-                
-                <h3 style="margin-top: 30px;">🔄 WordPress Function Conversions</h3>
-                <div style="background: #f6f7f7; padding: 15px; border-radius: 4px; margin-top: 10px;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #c3c4c7;">WordPress</th>
-                            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #c3c4c7;">CMS Equivalent</th>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>the_title()</code></td>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>&lt;?php echo $page['title']; ?&gt;</code></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>the_content()</code></td>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>&lt;?php echo $page['content']; ?&gt;</code></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>wp_nav_menu()</code></td>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>CMS Menu System</code></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>get_header()</code></td>
-                            <td style="padding: 8px; border-bottom: 1px solid #e5e5e5;"><code>include header.php</code></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px;"><code>bloginfo()</code></td>
-                            <td style="padding: 8px;"><code>CMS Settings</code></td>
-                        </tr>
-                    </table>
+                    </div>
+                <?php endif; ?>
+                <div style="margin-top:20px; display:flex; gap:12px; flex-wrap:wrap;">
+                    <a href="appearance.php" class="button button-primary">Manage Themes</a>
+                    <a href="<?php echo $baseUrl; ?>/cms/" target="_blank" class="button">Preview Site</a>
                 </div>
-            </div>
+            </section>
+        <?php endif; ?>
+    </main>
+
+    <div class="conversion-overlay" id="conversionOverlay" role="alert" aria-live="assertive" aria-hidden="true">
+        <div class="conversion-overlay__card">
+            <div class="conversion-overlay__spinner" aria-hidden="true"></div>
+            <h2 style="margin:0 0 8px; font-size:1.35rem; color:#0f172a;">Converting theme…</h2>
+            <p style="margin:0; color:#475569;">We’re uploading your package and transforming template files. Keep this tab open; you’ll see the result in a moment.</p>
         </div>
     </div>
-    
+
+    <?php include 'footer.php'; ?>
     <script>
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('themeFile');
         const convertBtn = document.getElementById('convertBtn');
         const fileName = document.getElementById('fileName');
-        
-        // Drag and drop
+        const form = document.getElementById('uploadForm');
+        const overlay = document.getElementById('conversionOverlay');
+
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadArea.classList.add('dragover');
         });
-        
+
         uploadArea.addEventListener('dragleave', () => {
             uploadArea.classList.remove('dragover');
         });
-        
+
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
@@ -316,23 +419,27 @@ if (defined('APP_URL')) {
                 convertBtn.disabled = false;
             }
         });
-        
+
         fileInput.addEventListener('change', () => {
-            if (fileInput.files.length > 0) {
+            if (fileInput.files.length) {
                 fileName.textContent = fileInput.files[0].name;
                 convertBtn.disabled = false;
             }
         });
-        
-        // Form submission
-        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+
+        form.addEventListener('submit', (e) => {
             if (!fileInput.files.length) {
                 e.preventDefault();
                 alert('Please select a theme file to convert.');
-                return false;
+                return;
             }
             convertBtn.disabled = true;
             convertBtn.textContent = '⏳ Converting...';
+            if (overlay) {
+                overlay.classList.add('is-visible');
+                overlay.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('conversion-overlay-active');
+            }
         });
     </script>
 </body>

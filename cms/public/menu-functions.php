@@ -52,6 +52,11 @@ function renderMenuItems($items, $parentId = null, $level = 0, $context = 'heade
     
     $html .= '<ul class="' . $ulClass . '">';
     
+    if (!isset($baseUrl)) {
+        require_once __DIR__ . '/base-url.php';
+    }
+    $base = rtrim($baseUrl ?? '', '/');
+
     foreach ($children as $item) {
         $isActive = false;
         $currentPath = $_SERVER['REQUEST_URI'] ?? '';
@@ -77,7 +82,8 @@ function renderMenuItems($items, $parentId = null, $level = 0, $context = 'heade
         
         $html .= '<li class="' . implode(' ', $classes) . '">';
         $linkClass = $context === 'footer' ? 'cms-footer-link' : 'cms-nav-link';
-        $html .= '<a href="' . htmlspecialchars($item['url']) . '" class="' . $linkClass . '">';
+        $href = normaliseMenuUrl($item['url'] ?? '', $base);
+        $html .= '<a href="' . htmlspecialchars($href) . '" class="' . $linkClass . '">';
         $html .= htmlspecialchars($item['label']);
         $html .= '</a>';
         
@@ -93,5 +99,37 @@ function renderMenuItems($items, $parentId = null, $level = 0, $context = 'heade
     $html .= '</ul>';
     
     return $html;
+}
+
+/**
+ * Normalise menu URL to ensure absolute paths resolve correctly
+ */
+function normaliseMenuUrl(string $url, string $baseUrl): string
+{
+    $trimmed = trim($url);
+    if ($trimmed === '') {
+        return '#';
+    }
+
+    // External links (http, https, mailto, tel) should remain untouched
+    if (preg_match('#^(https?:)?//#i', $trimmed) || preg_match('#^(mailto|tel):#i', $trimmed)) {
+        return $trimmed;
+    }
+
+    // Anchor links should stay relative
+    if ($trimmed[0] === '#') {
+        return $trimmed;
+    }
+
+    // Ensure leading slash for site-relative paths
+    if ($trimmed[0] !== '/') {
+        $trimmed = '/' . ltrim($trimmed, '/');
+    }
+
+    if ($baseUrl !== '') {
+        return $baseUrl . $trimmed;
+    }
+
+    return $trimmed;
 }
 

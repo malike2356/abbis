@@ -3,49 +3,59 @@
 if (!defined('FOOTER_OUTPUT')) {
     define('FOOTER_OUTPUT', true);
 ?>
-<style>
-    /* Ensure body has proper spacing for fixed header and sidebar */
-    body {
-        margin-left: 160px !important;
-        margin-top: 32px !important;
-        padding-bottom: 20px !important;
+<script>
+function toggleMobileMenu() {
+    const sidebar = document.getElementById('admin-sidebar');
+    const overlay = document.getElementById('mobile-sidebar-overlay');
+
+    if (!sidebar) {
+        return;
     }
-    
-    /* Ensure wrap doesn't overlap with sidebar */
-    .wrap {
-        margin-left: 0 !important;
+
+    const isOpen = sidebar.classList.toggle('is-open');
+
+    if (overlay) {
+        overlay.classList.toggle('active', isOpen);
     }
-    
-    /* Ensure sidebar is always visible and positioned correctly - PERSISTS ON ALL PAGES */
-    .admin-sidebar {
-        display: block !important;
-        position: fixed !important;
-        left: 0 !important;
-        top: 32px !important;
-        bottom: 0 !important;
-        width: 160px !important;
-        z-index: 998 !important;
-        visibility: visible !important;
-        opacity: 1 !important;
+
+    document.body.classList.toggle('sidebar-open', isOpen);
+}
+
+window.addEventListener('resize', function() {
+    if (window.innerWidth > 1024) {
+        const sidebar = document.getElementById('admin-sidebar');
+        const overlay = document.getElementById('mobile-sidebar-overlay');
+        if (sidebar) {
+            sidebar.classList.remove('is-open');
+        }
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+        document.body.classList.remove('sidebar-open');
     }
-    
-    /* Ensure header is fixed and PERSISTS ON ALL PAGES */
-    .admin-header {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 999 !important;
-        visibility: visible !important;
-        opacity: 1 !important;
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const sidebar = document.getElementById('admin-sidebar');
+    if (!sidebar) {
+        return;
     }
-    
-    /* Mobile responsive - hide sidebar on small screens */
-    @media (max-width: 782px) {
-        body { margin-left: 0 !important; }
-        .admin-sidebar { display: none !important; }
-        .admin-header { padding-left: 20px !important; }
-    }
-</style>
+
+    sidebar.querySelectorAll('a').forEach(link => {
+        link.addEventListener('click', () => {
+            if (window.innerWidth <= 1024) {
+                setTimeout(() => {
+                    const overlay = document.getElementById('mobile-sidebar-overlay');
+                    sidebar.classList.remove('is-open');
+                    if (overlay) {
+                        overlay.classList.remove('active');
+                    }
+                    document.body.classList.remove('sidebar-open');
+                }, 150);
+            }
+        });
+    });
+});
+</script>
 <?php } ?>
 

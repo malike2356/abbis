@@ -2,8 +2,8 @@
 /**
  * Construction Theme - Single Post Template
  */
-$primaryColor = $themeConfig['primary_color'] ?? '#f39c12';
-$secondaryColor = $themeConfig['secondary_color'] ?? '#34495e';
+$primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
+$secondaryColor = $themeConfig['secondary_color'] ?? '#0f2440';
 $baseUrl = $baseUrl ?? '/abbis3.2';
 $themeUrl = $baseUrl . '/cms/themes/construction';
 ?>
@@ -35,7 +35,7 @@ $themeUrl = $baseUrl . '/cms/themes/construction';
     <?php include __DIR__ . '/../../public/header.php'; ?>
 
     <!-- Post Header -->
-    <section class="post-header" style="background: linear-gradient(135deg, var(--primary), #e67e22); color: white; padding: 100px 0 80px; text-align: center;">
+    <section class="post-header" style="background: linear-gradient(135deg, var(--primary), #2563eb); color: white; padding: 100px 0 80px; text-align: center;">
         <div class="container">
             <h1 style="font-size: 3rem; font-weight: 700; margin-bottom: 1rem; color: white;"><?php echo htmlspecialchars($post['title'] ?? 'Post'); ?></h1>
             <div class="post-meta" style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-top: 1rem; opacity: 0.9;">

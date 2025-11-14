@@ -148,6 +148,16 @@ require_once '../includes/header.php';
     </div>
 </div>
 
+<div class="dashboard-card" style="border-left: 4px solid rgba(59,130,246,0.5); background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.02));">
+    <h2>🧭 Guided Onboarding Wizard</h2>
+    <p style="color: var(--secondary); margin-bottom: 16px;">
+        Need to import clients, rigs, workers, or catalog items from spreadsheets? Launch the step-by-step onboarding wizard for column mapping, preview, and import tracking.
+    </p>
+    <a href="onboarding-wizard.php" class="btn btn-primary">
+        Launch Onboarding Wizard →
+    </a>
+</div>
+
 <!-- Export Section -->
 <div class="dashboard-card">
     <h2>📤 Export System Data</h2>
@@ -156,22 +166,53 @@ require_once '../includes/header.php';
     </p>
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-        <a href="../api/export.php?module=system&format=json" class="btn btn-primary" style="text-align: center; padding: 20px;">
+        <a href="<?php echo api_url('export.php', ['module' => 'system', 'format' => 'json']); ?>" class="btn btn-primary" style="text-align: center; padding: 20px;">
             <div style="font-size: 32px; margin-bottom: 10px;">📄</div>
             <div><strong>Export JSON</strong></div>
             <small style="display: block; margin-top: 5px; opacity: 0.8;">Complete data in JSON format</small>
         </a>
         
-        <a href="../api/export.php?module=system&format=sql" class="btn btn-primary" style="text-align: center; padding: 20px;">
+        <a href="<?php echo api_url('export.php', ['module' => 'system', 'format' => 'sql']); ?>" class="btn btn-primary" style="text-align: center; padding: 20px;">
             <div style="font-size: 32px; margin-bottom: 10px;">🗄️</div>
             <div><strong>Export SQL</strong></div>
             <small style="display: block; margin-top: 5px; opacity: 0.8;">SQL INSERT statements</small>
         </a>
         
-        <a href="../api/export.php?module=system&format=csv" class="btn btn-primary" style="text-align: center; padding: 20px;">
+        <a href="<?php echo api_url('export.php', ['module' => 'system', 'format' => 'csv']); ?>" class="btn btn-primary" style="text-align: center; padding: 20px;">
             <div style="font-size: 32px; margin-bottom: 10px;">📊</div>
             <div><strong>Export CSV</strong></div>
             <small style="display: block; margin-top: 5px; opacity: 0.8;">ZIP with CSV files</small>
+        </a>
+    </div>
+</div>
+
+<div class="dashboard-card">
+    <h2>🖥️ Command Line Imports</h2>
+    <p style="color: var(--secondary); margin-bottom: 16px;">
+        Automate onboarding by running imports from the server terminal. Best for large datasets or scripted migrations.
+    </p>
+    <pre style="background: #0f172a; color: #e2e8f0; padding: 14px 18px; border-radius: 8px; font-size: 13px; overflow-x: auto;">
+php scripts/import-dataset.php clients storage/import/clients.csv
+php scripts/import-dataset.php rigs data/rigs.csv --delimiter=";" --no-update</pre>
+    <p style="color: var(--secondary); font-size: 13px;">
+        Use <code>--delimiter</code> to override CSV delimiter, <code>--no-update</code> to prevent updates, and <code>--allow-blank-overwrite</code> to overwrite existing values with blanks.
+    </p>
+</div>
+
+<div class="dashboard-card" style="border-left: 4px solid rgba(16,185,129,0.45); background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(16,185,129,0.02));">
+    <h2>🪱 Geology Wells Dataset</h2>
+    <p style="color: var(--secondary); margin-bottom: 16px;">
+        Feed the Geology Estimator with historical well logs. Upload latitude/longitude, depth, lithology, aquifer type, and yield information to improve predictions.
+    </p>
+    <ul style="color: var(--secondary); font-size: 13px; margin: 0 0 18px 18px;">
+        <li>Download a sample template from the <strong>Onboarding Wizard</strong> (choose Geology Wells).</li>
+        <li>Include accurate coordinates (WGS84) and drilled depth (meters).</li>
+        <li>Optional fields: water level, yield, lithology, aquifer type, TDS, confidence score.</li>
+    </ul>
+    <div style="display:flex; flex-wrap:wrap; gap:12px;">
+        <a href="onboarding-wizard.php" class="btn btn-primary">Import Geology Wells →</a>
+        <a href="geology-estimator.php" class="btn btn-primary" style="background: rgba(16,185,129,0.12); color:#047857; border-color: rgba(16,185,129,0.25);">
+            Open Geology Estimator
         </a>
     </div>
 </div>
@@ -184,7 +225,7 @@ require_once '../includes/header.php';
         <strong style="color: #d97706;">⚠️ These are test records and should be purged before deployment.</strong>
     </p>
     
-    <form id="testDataForm" method="POST" action="../api/insert-dummy-reports.php" class="ajax-form">
+    <form id="testDataForm" method="POST" action="<?php echo api_url('insert-dummy-reports.php'); ?>" class="ajax-form">
         <?php echo CSRF::getTokenField(); ?>
         
         <div class="form-group">
@@ -275,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function() {
         Import data from a previous export to prepopulate the system.
     </p>
     
-    <form id="importForm" method="POST" action="../api/system-import.php" enctype="multipart/form-data" class="ajax-form">
+    <form id="importForm" method="POST" action="<?php echo api_url('system-import.php'); ?>" enctype="multipart/form-data" class="ajax-form">
         <?php echo CSRF::getTokenField(); ?>
         
         <div class="form-group">
@@ -312,7 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
         This action cannot be undone. Make sure you have exported a backup before proceeding.
     </p>
     
-    <form id="purgeForm" method="POST" action="../api/system-purge.php" class="ajax-form">
+    <form id="purgeForm" method="POST" action="<?php echo api_url('system-purge.php'); ?>" class="ajax-form">
         <?php echo CSRF::getTokenField(); ?>
         
         <!-- Purge Mode Selection -->

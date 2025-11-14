@@ -6,6 +6,7 @@
 $rootPath = dirname(dirname(__DIR__));
 require_once $rootPath . '/config/app.php';
 require_once $rootPath . '/includes/functions.php';
+require_once $rootPath . '/includes/pos/UnifiedInventoryService.php';
 require_once __DIR__ . '/base-url.php';
 
 $pdo = getDBConnection();
@@ -177,31 +178,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
             $pdo->beginTransaction();
             
             // Create order
+            // Check if customer is an existing ABBIS client
+            $clientId = null;
+            try {
+                $clientCheck = $pdo->prepare("SELECT id FROM clients WHERE email=? OR client_name=? LIMIT 1");
+                $clientCheck->execute([$customerEmail, $customerName]);
+                $clientId = $clientCheck->fetchColumn();
+                
+                // If not found, create new client
+                if (!$clientId) {
+                    $newClientStmt = $pdo->prepare("INSERT INTO clients (client_name, email, contact_number, address, source, status, created_at) VALUES (?,?,?,?,'CMS Order','lead',NOW())");
+                    $newClientStmt->execute([$customerName, $customerEmail, $customerPhone, $customerAddress]);
+                    $clientId = $pdo->lastInsertId();
+                }
+            } catch (Exception $e) {
+                // Clients table might not exist or other error - continue without linking
+            }
+            
             $orderStmt = $pdo->prepare("
                 INSERT INTO cms_orders (
                     order_number, order_key, customer_name, customer_email, customer_phone, 
                     customer_address, subtotal, shipping_cost, tax_amount, total_amount, 
-                    shipping_method_id, customer_notes, status
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')
+                    shipping_method_id, customer_notes, status, client_id
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
             ");
             $orderStmt->execute([
                 $orderNumber, $orderKey, $customerName, $customerEmail, $customerPhone,
                 $customerAddress, $subtotal, $shippingCost, $taxAmount, $total,
-                $selectedShipping, $customerNotes
+                $selectedShipping, $customerNotes, $clientId
             ]);
             $orderId = $pdo->lastInsertId();
             
-            // Add order items
+            // Add order items and reserve inventory (deduct when order is completed)
             $itemStmt = $pdo->prepare("
                 INSERT INTO cms_order_items (order_id, catalog_item_id, item_name, quantity, unit_price, total)
                 VALUES (?,?,?,?,?,?)
             ");
+            $inventoryService = new UnifiedInventoryService($pdo);
             foreach ($cartItems as $item) {
                 $itemTotal = intval($item['quantity']) * $item['unit_price'];
                 $itemStmt->execute([
                     $orderId, $item['catalog_item_id'], $item['item_name'], 
                     intval($item['quantity']), $item['unit_price'], $itemTotal
                 ]);
+                
+                // Reserve inventory (deduct stock) when order is placed
+                // Note: Inventory is deducted immediately on order placement
+                // If order is cancelled later, inventory should be restored
+                try {
+                    $quantity = (float) intval($item['quantity']);
+                    $inventoryService->updateCatalogStock(
+                        (int) $item['catalog_item_id'], 
+                        -$quantity, 
+                        "CMS Order: {$orderNumber}"
+                    );
+                } catch (Throwable $e) {
+                    error_log('[CMS Checkout] Inventory sync failed for item ' . $item['catalog_item_id'] . ': ' . $e->getMessage());
+                    // Continue processing order even if inventory sync fails
+                }
             }
             
             // Create payment record
@@ -289,7 +323,6 @@ $companyName = getCMSSiteName('Our Store');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Checkout - <?php echo htmlspecialchars($companyName); ?></title>
-    <?php include __DIR__ . '/header.php'; ?>
     <style>
         .checkout-container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
         .checkout-steps { display: flex; justify-content: space-between; margin-bottom: 3rem; padding: 0; list-style: none; }

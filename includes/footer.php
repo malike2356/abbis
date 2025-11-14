@@ -27,6 +27,7 @@
     <script src="<?php echo (isset($_SESSION['is_module']) && $_SESSION['is_module']) ? '../' : ''; ?>assets/js/keyboard-shortcuts.js"></script>
     <script src="<?php echo (isset($_SESSION['is_module']) && $_SESSION['is_module']) ? '../' : ''; ?>assets/js/realtime-updates.js"></script>
     <script src="<?php echo (isset($_SESSION['is_module']) && $_SESSION['is_module']) ? '../' : ''; ?>assets/js/advanced-search.js"></script>
+    <script src="<?php echo (isset($_SESSION['is_module']) && $_SESSION['is_module']) ? '../' : ''; ?>assets/js/ai-assistant.js"></script>
     <?php if (isset($additional_js)): ?>
         <?php foreach ($additional_js as $js): ?>
             <script src="<?php echo e($js); ?>"></script>

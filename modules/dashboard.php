@@ -4,6 +4,7 @@ require_once '../config/security.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
+require_once '../includes/navigation-tracker.php';
 
 $auth->requireAuth();
 
@@ -11,9 +12,29 @@ $page_title = 'Dashboard - Executive Overview';
 
 // Get analytics filter parameters (for analytics tab)
 $pdo = getDBConnection();
-$startDate = $_GET['start_date'] ?? date('Y-m-01');
-$endDate = $_GET['end_date'] ?? date('Y-m-t');
+$today = date('Y-m-d');
+$defaultStartDate = date('Y-01-01');
+$defaultEndDate = $today;
+$currentMonth = (int) date('n');
+$quarterStartMonth = ((int) floor(($currentMonth - 1) / 3) * 3) + 1;
+$quarterStartDate = date('Y-' . str_pad((string) $quarterStartMonth, 2, '0', STR_PAD_LEFT) . '-01');
+$thisMonthStart = date('Y-m-01');
+$thisMonthEnd = date('Y-m-t');
+$lastSixtyStart = date('Y-m-d', strtotime('-59 days', strtotime($today)));
+$lastNinetyStart = date('Y-m-d', strtotime('-89 days', strtotime($today)));
+$lastSixMonthsStart = date('Y-m-01', strtotime('-5 months', strtotime($today)));
+$lastTwelveStart = date('Y-m-01', strtotime('-11 months', strtotime($today)));
+$startDate = $_GET['start_date'] ?? $defaultStartDate;
+$endDate = $_GET['end_date'] ?? $defaultEndDate;
 $groupBy = $_GET['group_by'] ?? 'month';
+$thisMonthEndForFilters = $today < $thisMonthEnd ? $today : $thisMonthEnd;
+$isYtdActive = ($startDate === $defaultStartDate && $endDate === $defaultEndDate);
+$isQuarterActive = ($startDate === $quarterStartDate && $endDate === $defaultEndDate);
+$isMonthActive = ($startDate === $thisMonthStart && $endDate === $thisMonthEndForFilters);
+$isLast60Active = ($startDate === $lastSixtyStart && $endDate === $defaultEndDate);
+$isLast90Active = ($startDate === $lastNinetyStart && $endDate === $defaultEndDate);
+$isLast6Active = ($startDate === $lastSixMonthsStart && $endDate === $defaultEndDate);
+$isLast12Active = ($startDate === $lastTwelveStart && $endDate === $defaultEndDate);
 $selectedRig = $_GET['rig_id'] ?? '';
 $selectedClient = $_GET['client_id'] ?? '';
 $selectedJobType = $_GET['job_type'] ?? '';
@@ -22,6 +43,20 @@ $selectedJobType = $_GET['job_type'] ?? '';
 $rigs = $pdo->query("SELECT id, rig_name FROM rigs WHERE status = 'active' ORDER BY rig_name")->fetchAll();
 $clients = $pdo->query("SELECT id, client_name FROM clients ORDER BY client_name LIMIT 100")->fetchAll();
 $jobTypes = ['direct' => 'Direct', 'subcontract' => 'Subcontract'];
+$currentUserId = $_SESSION['user_id'] ?? null;
+$quickActions = NavigationTracker::getTopQuickActions($currentUserId ? (int) $currentUserId : null, 8);
+
+// Set AI Assistant context for dashboard (before header is included)
+$aiContext = [
+    'entity_type' => '',
+    'entity_id' => '',
+    'entity_label' => 'Dashboard',
+];
+$aiQuickPrompts = [
+    'Summarise today\'s performance highlights',
+    'Which clients need attention this week?',
+    'What operational risks should we focus on?',
+];
 
 try {
     $stats = $abbis->getDashboardStats();
@@ -78,24 +113,99 @@ function formatTrend($value, $showSign = true) {
     return '<span class="trend ' . $color . '">' . $icon . ' ' . ($showSign ? $sign : '') . number_format($value, 2) . '%</span>';
 }
 
+$userRole = $auth->getUserRole();
+$isLeadership = in_array($userRole, [ROLE_ADMIN, ROLE_MANAGER], true);
+$showFinancial = $isLeadership || $auth->userHasPermission('finance.access');
+$showOperational = $isLeadership || $auth->userHasPermission('field_reports.manage') || $auth->userHasPermission('resources.access');
+$showCRM = $isLeadership || $auth->userHasPermission('crm.access');
+$showHR = $isLeadership || $auth->userHasPermission('hr.access');
+$showAnyKpi = $showFinancial || $showOperational || $showCRM || $showHR;
+
 require_once '../includes/header.php';
 ?>
 
+<div class="dashboard-page">
 <style>
-    /* Sleek, Thin KPI Cards */
+    .dashboard-page {
+        margin-top: 32px;
+    }
+
+    /* ============================================
+       WORLD-CLASS DASHBOARD DESIGN SYSTEM
+       Combining WordPress, Drupal, and Joomla best practices
+       ============================================ */
+    
+    /* Enhanced Color Palette (WordPress + Drupal inspired) */
+    :root {
+        --wp-blue: #2271b1;
+        --wp-blue-hover: #135e96;
+        --wp-gray-50: #f6f7f7;
+        --wp-gray-100: #f0f0f1;
+        --wp-gray-200: #c3c4c7;
+        --wp-gray-600: #646970;
+        --wp-gray-900: #1d2327;
+        --drupal-blue: #0073aa;
+        --success-green: #00a32a;
+        --warning-orange: #dba617;
+        --danger-red: #d63638;
+        --gradient-primary: linear-gradient(135deg, #2271b1 0%, #135e96 100%);
+        --gradient-success: linear-gradient(135deg, #00a32a 0%, #008a20 100%);
+        --gradient-warning: linear-gradient(135deg, #dba617 0%, #c19b00 100%);
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+    
+    /* Sleek, Modern KPI Cards (WordPress-inspired) */
     .kpi-card {
         background: var(--card);
         border: 1px solid var(--border);
-        border-left: 3px solid var(--primary);
-        border-radius: 8px;
-        padding: 16px 18px;
+        border-left: 4px solid var(--primary);
+        border-radius: 12px;
+        padding: 20px 22px;
         position: relative;
-        transition: all 0.2s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+    
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--gradient-primary);
+        opacity: 0;
+        transition: opacity 0.3s ease;
     }
     
     .kpi-card:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        border-left-color: var(--primary-dark);
+        box-shadow: var(--shadow-lg);
+        border-left-color: var(--wp-blue-hover);
+        transform: translateY(-2px);
+    }
+    
+    .kpi-card:hover::before {
+        opacity: 1;
+    }
+    
+    /* Gradient accent cards for key metrics */
+    .kpi-card.primary-gradient {
+        background: linear-gradient(135deg, rgba(34, 113, 177, 0.05) 0%, rgba(34, 113, 177, 0.02) 100%);
+        border-left-color: var(--wp-blue);
+    }
+    
+    .kpi-card.success-gradient {
+        background: linear-gradient(135deg, rgba(0, 163, 42, 0.05) 0%, rgba(0, 163, 42, 0.02) 100%);
+        border-left-color: var(--success-green);
+    }
+    
+    .kpi-card.warning-gradient {
+        background: linear-gradient(135deg, rgba(219, 166, 23, 0.05) 0%, rgba(219, 166, 23, 0.02) 100%);
+        border-left-color: var(--warning-orange);
     }
     
     .kpi-card-header {
@@ -115,12 +225,31 @@ require_once '../includes/header.php';
     }
     
     .kpi-card-value {
-        font-size: 24px;
+        font-size: 28px;
         font-weight: 700;
         color: var(--text);
-        margin: 4px 0;
+        margin: 6px 0;
         line-height: 1.2;
         letter-spacing: -0.5px;
+        background: linear-gradient(135deg, var(--text) 0%, var(--secondary) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* Override gradient for specific card types */
+    .kpi-card.primary-gradient .kpi-card-value {
+        background: linear-gradient(135deg, var(--wp-blue) 0%, var(--wp-blue-hover) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .kpi-card.success-gradient .kpi-card-value {
+        background: linear-gradient(135deg, var(--success-green) 0%, #008a20 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
     
     .kpi-card-subtitle {
@@ -182,32 +311,61 @@ require_once '../includes/header.php';
         }
     }
     
+    /* Enhanced Stat Cards (WordPress-style) */
     .stat-card {
         background: var(--card);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 18px 20px;
+        border-radius: 12px;
+        padding: 22px 24px;
         display: flex;
         align-items: center;
-        gap: 16px;
-        transition: all 0.2s ease;
+        gap: 18px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: var(--shadow-sm);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stat-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        background: var(--gradient-primary);
+        transform: scaleY(0);
+        transform-origin: bottom;
+        transition: transform 0.3s ease;
     }
     
     .stat-card:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        transform: translateY(-1px);
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-3px);
+        border-color: var(--wp-blue);
+    }
+    
+    .stat-card:hover::after {
+        transform: scaleY(1);
     }
     
     .stat-icon {
-        font-size: 28px;
-        opacity: 0.7;
-        width: 48px;
-        height: 48px;
+        font-size: 32px;
+        opacity: 0.9;
+        width: 56px;
+        height: 56px;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(14,165,233,0.08);
-        border-radius: 8px;
+        background: linear-gradient(135deg, rgba(34, 113, 177, 0.12) 0%, rgba(34, 113, 177, 0.06) 100%);
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        position: relative;
+    }
+    
+    .stat-card:hover .stat-icon {
+        transform: scale(1.1);
+        background: linear-gradient(135deg, rgba(34, 113, 177, 0.2) 0%, rgba(34, 113, 177, 0.1) 100%);
     }
     
     .stat-info h3 {
@@ -350,25 +508,65 @@ require_once '../includes/header.php';
         color: var(--danger);
     }
     
+    /* Enhanced Dashboard Cards (Drupal-style blocks) */
+    .dashboard-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 24px;
+        box-shadow: var(--shadow-sm);
+        transition: all 0.3s ease;
+        position: relative;
+    }
+    
+    .dashboard-card:hover {
+        box-shadow: var(--shadow-md);
+    }
+    
     .dashboard-card h2 {
-        font-size: 15px;
-        font-weight: 600;
+        font-size: 18px;
+        font-weight: 700;
         color: var(--text);
-        margin: 0 0 16px 0;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--border);
-        letter-spacing: -0.2px;
+        margin: 0 0 20px 0;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--border);
+        letter-spacing: -0.3px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .dashboard-card h2::before {
+        content: '';
+        width: 4px;
+        height: 18px;
+        background: var(--gradient-primary);
+        border-radius: 2px;
     }
     
     /* Key Performance Indicators Section */
+    /* Hero Section (WordPress + Drupal inspired) */
     .kpi-hero-section {
-        background: var(--card);
+        background: linear-gradient(135deg, var(--card) 0%, rgba(255, 255, 255, 0.98) 100%);
         border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 24px;
+        border-radius: 16px;
+        padding: 32px;
+        margin-bottom: 32px;
         color: var(--text);
-        box-shadow: 0 2px 6px color-mix(in srgb, var(--text) 8%, transparent);
+        box-shadow: var(--shadow-md);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .kpi-hero-section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-primary);
     }
     
     .kpi-hero-section h2 {
@@ -390,23 +588,45 @@ require_once '../includes/header.php';
     
     .kpi-hero-card {
         background: var(--card);
-        border-radius: 12px;
-        padding: 18px;
+        border-radius: 14px;
+        padding: 24px;
         border: 1px solid var(--border);
-        transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-        position: relative; /* for corner icon */
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
     }
     
-    /* subtle edge styling */
+    /* Enhanced edge styling with gradient */
     .kpi-hero-card.edge {
-        border-left: 3px solid var(--primary);
-        box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 10%, transparent);
+        border-left: 4px solid;
+        border-image: var(--gradient-primary) 1;
+        box-shadow: var(--shadow-md);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(246, 247, 247, 0.5) 100%);
     }
     
     .kpi-hero-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(0,0,0,0.10);
-        background: var(--card);
+        transform: translateY(-4px) scale(1.02);
+        box-shadow: var(--shadow-xl);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(240, 240, 241, 0.8) 100%);
+        border-color: var(--wp-blue);
+    }
+    
+    .kpi-hero-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 60px;
+        height: 60px;
+        background: radial-gradient(circle, rgba(34, 113, 177, 0.1) 0%, transparent 70%);
+        border-radius: 0 14px 0 100%;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .kpi-hero-card:hover::after {
+        opacity: 1;
     }
     
     .kpi-hero-label {
@@ -419,11 +639,15 @@ require_once '../includes/header.php';
     }
     
     .kpi-hero-value {
-        font-size: 32px;
-        font-weight: 700;
-        line-height: 1;
-        margin-bottom: 4px;
-        color: var(--text);
+        font-size: 36px;
+        font-weight: 800;
+        line-height: 1.1;
+        margin-bottom: 6px;
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: -1px;
     }
 
     /* Top client tweaks */
@@ -618,8 +842,75 @@ require_once '../includes/header.php';
         color: #10b981;
     }
     
-    .trend.negative {
-        color: #ef4444;
+    /* Action Dropdown Styles */
+    .action-dropdown {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .action-dropdown-toggle {
+        position: relative;
+        z-index: 1;
+    }
+    
+    .action-dropdown-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 4px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        min-width: 180px;
+        z-index: 1000;
+        padding: 4px 0;
+        display: none;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    
+    .action-dropdown-menu.show {
+        display: block;
+    }
+    
+    .action-menu-item {
+        display: block;
+        padding: 10px 16px;
+        color: var(--text);
+        text-decoration: none;
+        font-size: 13px;
+        transition: background 0.2s;
+        border: none;
+        background: none;
+        width: 100%;
+        text-align: left;
+        cursor: pointer;
+    }
+    
+    .action-menu-item:hover {
+        background: var(--bg);
+        color: var(--text);
+    }
+    
+    .action-menu-item-danger {
+        color: var(--danger);
+    }
+    
+    .action-menu-item-danger:hover {
+        background: rgba(239,68,68,0.1);
+        color: var(--danger);
+    }
+    
+    /* Ensure table cell doesn't overflow */
+    .data-table td {
+        position: relative;
+        overflow: visible;
+    }
+    
+    /* Prevent dropdown from being cut off by table overflow */
+    .data-table {
+        position: relative;
     }
     
     /* Clickable KPI cards */
@@ -628,8 +919,310 @@ require_once '../includes/header.php';
     }
     
     .kpi-card.clickable:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-xl);
+    }
+    
+    /* Quick Actions Panel (WordPress-style) */
+    .quick-actions-panel {
+        background: linear-gradient(135deg, var(--card) 0%, rgba(246, 247, 247, 0.95) 100%);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .quick-actions-panel .section-title {
+        margin-bottom: 10px;
+        font-size: 18px;
+    }
+    
+    .quick-actions-panel .section-subtitle {
+        font-size: 11px;
+    }
+    
+    .quick-actions-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+    }
+    
+    .quick-action-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 8px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        text-decoration: none;
+        color: var(--text);
+        transition: all 0.2s ease;
+        position: relative;
+        overflow: hidden;
+        min-height: 90px;
+        gap: 6px;
+    }
+    
+    .quick-action-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(34, 113, 177, 0.1), transparent);
+        transition: left 0.5s ease;
+    }
+    
+    .quick-action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+        border-color: var(--wp-blue);
+        background: linear-gradient(135deg, rgba(34, 113, 177, 0.05) 0%, rgba(34, 113, 177, 0.02) 100%);
+    }
+    
+    .quick-action-btn:hover::before {
+        left: 100%;
+    }
+    
+    /* Quick range selector for analytics */
+    .range-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+    
+    .range-selector .range-btn {
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: var(--card, #fff);
+        color: var(--secondary);
+        border-radius: 999px;
+        padding: 6px 16px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .range-selector .range-btn:hover {
+        border-color: rgba(14, 165, 233, 0.45);
+        color: var(--primary);
+        box-shadow: 0 4px 12px -6px rgba(14, 165, 233, 0.45);
+        transform: translateY(-1px);
+    }
+    
+    .range-selector .range-btn.active {
+        background: linear-gradient(135deg, rgba(14,165,233,0.18) 0%, rgba(14,165,233,0.06) 100%);
+        border-color: rgba(14,165,233,0.55);
+        color: var(--primary);
+        box-shadow: 0 8px 18px -8px rgba(14,165,233,0.5);
+    }
+    
+    .range-selector .range-btn:focus-visible {
+        outline: 2px solid rgba(14,165,233,0.6);
+        outline-offset: 2px;
+    }
+    
+    .quick-action-icon {
+        font-size: 24px;
+        transition: transform 0.2s ease;
+    }
+    
+    .quick-action-btn:hover .quick-action-icon {
+        transform: scale(1.15);
+    }
+    
+    .quick-action-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text);
+        text-align: center;
+        line-height: 1.25;
+    }
+    
+    /* Activity Feed (WordPress-style) */
+    .activity-feed {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .activity-item {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        transition: background 0.2s ease;
+        border-radius: 6px;
+        margin: 0 -12px;
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    
+    .activity-item:last-child {
+        border-bottom: none;
+    }
+    
+    .activity-item:hover {
+        background: var(--bg);
+    }
+    
+    .activity-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex-shrink: 0;
+        background: linear-gradient(135deg, rgba(34, 113, 177, 0.1) 0%, rgba(34, 113, 177, 0.05) 100%);
+    }
+    
+    .activity-content {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .activity-text {
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.5;
+        margin-bottom: 4px;
+    }
+    
+    .activity-time {
+        font-size: 11px;
+        color: var(--secondary);
+    }
+    
+    /* Enhanced Page Header (WordPress-style) */
+    .page-header {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px 28px;
+        margin-bottom: 24px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    
+    /* Dark mode: ensure proper contrast */
+    [data-theme="dark"] .page-header {
+        background: var(--card);
+        border-color: var(--border);
+    }
+    
+    .page-header h1 {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text);
+        margin: 0;
+        letter-spacing: -0.5px;
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .page-header p {
+        font-size: 14px;
+        color: var(--secondary);
+        margin: 4px 0 0 0;
+    }
+    
+    /* Enhanced Section Headers */
+    .section-header {
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .section-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text);
+        margin: 0;
+        letter-spacing: -0.3px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    /* Stats Grid Enhancement */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 20px;
+        margin-bottom: 24px;
+    }
+    
+    /* Loading States */
+    .loading-shimmer {
+        background: linear-gradient(90deg, var(--bg) 25%, rgba(255, 255, 255, 0.5) 50%, var(--bg) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    
+    /* Responsive Enhancements */
+    @media (max-width: 1200px) {
+        /* Stack sidebar below main content on tablets */
+        div[style*="grid-template-columns: 1fr 320px"] {
+            grid-template-columns: 1fr !important;
+        }
+    }
+    
+    @media (max-width: 768px) {
+        .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .quick-actions-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        /* Stack sidebar below main content on mobile */
+        div[style*="grid-template-columns: 1fr 320px"] {
+            grid-template-columns: 1fr !important;
+        }
+    }
+    
+    /* Smooth Scroll */
+    html {
+        scroll-behavior: smooth;
+    }
+    
+    /* Focus States for Accessibility */
+    .kpi-card:focus,
+    .stat-card:focus,
+    .quick-action-btn:focus {
+        outline: 2px solid var(--wp-blue);
+        outline-offset: 2px;
     }
 </style>
 
@@ -638,19 +1231,25 @@ require_once '../includes/header.php';
         <h1>Dashboard</h1>
         <p>Business Intelligence & Analytics</p>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
+    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
         <div style="font-size: 13px; color: var(--secondary);">
             Updated <?php echo date('M d, Y H:i'); ?>
         </div>
-        <div class="dashboard-export-buttons" style="display: flex; gap: 8px;">
-            <button onclick="exportDashboard('csv')" class="btn btn-sm btn-outline" title="Export as CSV">
+        <div class="dashboard-export-buttons" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <a href="field-reports.php?action=new" class="btn btn-sm" style="background: var(--primary); color: white; border-color: var(--primary); display: inline-flex; align-items: center; gap: 4px; text-decoration: none; white-space: nowrap; padding: 8px 14px;" title="Add New Field Report">
+                ➕ New Report
+            </a>
+            <a href="field-reports-list.php" class="btn btn-sm btn-outline" style="display: inline-flex; align-items: center; gap: 4px; text-decoration: none; white-space: nowrap; padding: 8px 14px;" title="View All Reports">
+                📋 All Reports
+            </a>
+            <button onclick="exportDashboard('csv')" class="btn btn-sm btn-outline" title="Export as CSV" style="white-space: nowrap;">
                 📥 CSV
             </button>
-            <button onclick="exportDashboard('json')" class="btn btn-sm btn-outline" title="Export as JSON">
+            <button onclick="exportDashboard('json')" class="btn btn-sm btn-outline" title="Export as JSON" style="white-space: nowrap;">
                 📥 JSON
             </button>
             <div class="export-dropdown" style="position: relative;">
-                <button onclick="toggleExportMenu()" class="btn btn-sm btn-outline" title="More Export Options">
+                <button onclick="toggleExportMenu()" class="btn btn-sm btn-outline" title="More Export Options" style="white-space: nowrap;">
                     📥 More ▼
                 </button>
                 <div id="exportMenu" class="export-menu" style="display: none;">
@@ -664,29 +1263,121 @@ require_once '../includes/header.php';
     </div>
 </div>
 
+<?php if (!$showAnyKpi): ?>
+<div class="dashboard-card" style="margin-top: 16px; border-left: 4px solid var(--primary); text-align: center;">
+    <h2 style="margin: 0 0 8px 0; font-size: 18px; color: var(--text);">Nothing to show yet</h2>
+    <p style="margin: 0; font-size: 13px; color: var(--secondary);">
+        Your profile doesn't have analytics widgets assigned. Reach out to your administrator if you need access to specific KPIs.
+    </p>
+</div>
+<?php endif; ?>
+
 <!-- Dashboard Alerts -->
 <div id="dashboardAlerts"></div>
 
+<!-- Quick Actions Panel (WordPress-style) -->
+<div class="quick-actions-panel">
+    <h2 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px;">
+        <span style="width: 4px; height: 18px; background: var(--gradient-primary); border-radius: 2px;"></span>
+        ⚡ Quick Actions
+    </h2>
+    <p style="margin: 0 0 16px 0; font-size: 13px; color: var(--secondary);">Common tasks and shortcuts</p>
+    <?php if (!empty($quickActions)): ?>
+        <div class="quick-actions-grid">
+            <?php foreach ($quickActions as $actionMeta): ?>
+                <a href="<?php echo htmlspecialchars($actionMeta['url']); ?>" class="quick-action-btn">
+                    <div class="quick-action-icon"><?php echo htmlspecialchars($actionMeta['icon']); ?></div>
+                    <div class="quick-action-label"><?php echo htmlspecialchars($actionMeta['label']); ?></div>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <div class="alert alert-info" style="margin: 16px 0 0;">
+            No quick actions available yet. Start exploring modules to build personalized shortcuts.
+        </div>
+    <?php endif; ?>
+</div>
+
 <!-- Interactive Filters -->
-<div class="dashboard-card" style="margin-bottom: 24px; border-left: 4px solid var(--primary);">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-        <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text);">🔍 Interactive Filters</h3>
-        <button onclick="resetFilters()" class="btn btn-sm btn-outline" style="font-size: 12px;">Reset Filters</button>
+<div class="dashboard-card" style="margin-bottom: 18px; border-left: 3px solid var(--primary); padding: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+        <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text);">🔍 Interactive Filters</h3>
+        <button onclick="resetFilters()" class="btn btn-sm btn-outline" style="font-size: 12px; padding: 6px 12px;">Reset Filters</button>
     </div>
-    <div class="filter-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+    <input type="hidden" id="filterGroupBy" value="<?php echo htmlspecialchars($groupBy); ?>">
+    <div class="range-selector" role="group" aria-label="Quick date ranges" style="margin-bottom: 12px;">
+        <button type="button"
+                class="range-btn<?php echo $isYtdActive ? ' active' : ''; ?>"
+                data-range="ytd"
+                data-start="<?php echo $defaultStartDate; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="month"
+                data-default="true">
+            Year to Date
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isQuarterActive ? ' active' : ''; ?>"
+                data-range="quarter"
+                data-start="<?php echo $quarterStartDate; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="month">
+            Quarter to Date
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isMonthActive ? ' active' : ''; ?>"
+                data-range="month"
+                data-start="<?php echo $thisMonthStart; ?>"
+                data-end="<?php echo $thisMonthEndForFilters; ?>"
+                data-group="day">
+            This Month
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isLast60Active ? ' active' : ''; ?>"
+                data-range="60days"
+                data-start="<?php echo $lastSixtyStart; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="week">
+            Last 60 Days
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isLast90Active ? ' active' : ''; ?>"
+                data-range="90days"
+                data-start="<?php echo $lastNinetyStart; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="week">
+            Last 90 Days
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isLast6Active ? ' active' : ''; ?>"
+                data-range="6months"
+                data-start="<?php echo $lastSixMonthsStart; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="month">
+            Last 6 Months
+        </button>
+        <button type="button"
+                class="range-btn<?php echo $isLast12Active ? ' active' : ''; ?>"
+                data-range="12months"
+                data-start="<?php echo $lastTwelveStart; ?>"
+                data-end="<?php echo $defaultEndDate; ?>"
+                data-group="month">
+            Last 12 Months
+        </button>
+    </div>
+    <div class="filter-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
         <div class="form-group" style="margin: 0;">
-            <label style="display: block; font-size: 12px; color: var(--secondary); margin-bottom: 6px; font-weight: 500;">Date From</label>
-            <input type="date" id="filterDateFrom" class="form-control" value="<?php echo date('Y-m-01'); ?>" 
-                   style="font-size: 13px; padding: 8px;" onchange="applyFilters()">
+            <label style="display: block; font-size: 11px; color: var(--secondary); margin-bottom: 4px; font-weight: 500;">Date From</label>
+            <input type="date" id="filterDateFrom" class="form-control" value="<?php echo htmlspecialchars($startDate); ?>" 
+                   style="font-size: 13px; padding: 6px 8px;" onchange="applyFilters()">
         </div>
         <div class="form-group" style="margin: 0;">
-            <label style="display: block; font-size: 12px; color: var(--secondary); margin-bottom: 6px; font-weight: 500;">Date To</label>
-            <input type="date" id="filterDateTo" class="form-control" value="<?php echo date('Y-m-t'); ?>" 
-                   style="font-size: 13px; padding: 8px;" onchange="applyFilters()">
+            <label style="display: block; font-size: 11px; color: var(--secondary); margin-bottom: 4px; font-weight: 500;">Date To</label>
+            <input type="date" id="filterDateTo" class="form-control" value="<?php echo htmlspecialchars($endDate); ?>" 
+                   style="font-size: 13px; padding: 6px 8px;" onchange="applyFilters()">
         </div>
         <div class="form-group" style="margin: 0;">
-            <label style="display: block; font-size: 12px; color: var(--secondary); margin-bottom: 6px; font-weight: 500;">Rig</label>
-            <select id="filterRig" class="form-control" style="font-size: 13px; padding: 8px;" onchange="applyFilters()">
+            <label style="display: block; font-size: 11px; color: var(--secondary); margin-bottom: 4px; font-weight: 500;">Rig</label>
+            <select id="filterRig" class="form-control" style="font-size: 13px; padding: 6px 8px;" onchange="applyFilters()">
                 <option value="">All Rigs</option>
                 <?php foreach ($rigs as $rig): ?>
                     <option value="<?php echo $rig['id']; ?>"><?php echo e($rig['rig_name']); ?></option>
@@ -694,8 +1385,8 @@ require_once '../includes/header.php';
             </select>
         </div>
         <div class="form-group" style="margin: 0;">
-            <label style="display: block; font-size: 12px; color: var(--secondary); margin-bottom: 6px; font-weight: 500;">Client</label>
-            <select id="filterClient" class="form-control" style="font-size: 13px; padding: 8px;" onchange="applyFilters()">
+            <label style="display: block; font-size: 11px; color: var(--secondary); margin-bottom: 4px; font-weight: 500;">Client</label>
+            <select id="filterClient" class="form-control" style="font-size: 13px; padding: 6px 8px;" onchange="applyFilters()">
                 <option value="">All Clients</option>
                 <?php foreach ($clients as $client): ?>
                     <option value="<?php echo $client['id']; ?>"><?php echo e($client['client_name']); ?></option>
@@ -703,8 +1394,8 @@ require_once '../includes/header.php';
             </select>
         </div>
         <div class="form-group" style="margin: 0;">
-            <label style="display: block; font-size: 12px; color: var(--secondary); margin-bottom: 6px; font-weight: 500;">Job Type</label>
-            <select id="filterJobType" class="form-control" style="font-size: 13px; padding: 8px;" onchange="applyFilters()">
+            <label style="display: block; font-size: 11px; color: var(--secondary); margin-bottom: 4px; font-weight: 500;">Job Type</label>
+            <select id="filterJobType" class="form-control" style="font-size: 13px; padding: 6px 8px;" onchange="applyFilters()">
                 <option value="">All Types</option>
                 <?php foreach ($jobTypes as $key => $label): ?>
                     <option value="<?php echo $key; ?>"><?php echo e($label); ?></option>
@@ -905,69 +1596,285 @@ try {
 <!-- Real-time Alerts Container -->
 <div id="realtime-alerts"></div>
 
-<!-- Alerts Cards - 3 Columns -->
-<?php if (intval($unpaidRigFees['count'] ?? 0) > 0 || intval($debtRecoveryAlert['count'] ?? 0) > 0): ?>
-<div class="alerts-grid">
-    <!-- Card 1: Unpaid Rig Fees -->
-    <?php if (intval($unpaidRigFees['count'] ?? 0) > 0): ?>
-    <div class="dashboard-card" style="border-left: 4px solid #f59e0b; padding: 20px;">
-        <div style="display: flex; align-items: start; gap: 12px; margin-bottom: 16px;">
-            <div style="font-size: 32px; color: #f59e0b;">💰</div>
-            <div style="flex: 1;">
-                <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: var(--text);">Unpaid Rig Fees</h3>
-                <p style="margin: 0; font-size: 14px; color: var(--secondary);">
-                    <?php echo number_format($unpaidRigFees['count']); ?> report<?php echo $unpaidRigFees['count'] != 1 ? 's' : ''; ?> with unpaid rig fees totaling GHS <?php echo number_format($unpaidRigFees['total_amount'], 2); ?>
-                </p>
-            </div>
+<?php
+    $showRigFeeAlert = intval($unpaidRigFees['count'] ?? 0) > 0;
+    $showDebtAlert = intval($debtRecoveryAlert['count'] ?? 0) > 0;
+?>
+<?php if ($showRigFeeAlert || $showDebtAlert): ?>
+<div id="floatingDebtAlerts" class="floating-debt-alerts" aria-live="polite">
+    <?php if ($showRigFeeAlert): ?>
+    <div class="floating-alert" data-alert-key="rig-fees">
+        <button type="button" class="floating-alert-close" data-close-alert aria-label="Dismiss unpaid rig fees alert">×</button>
+        <div class="floating-alert-icon" aria-hidden="true">💰</div>
+        <div class="floating-alert-content">
+            <h3>Unpaid Rig Fees</h3>
+            <p>
+                <?php echo number_format($unpaidRigFees['count']); ?> report<?php echo $unpaidRigFees['count'] != 1 ? 's' : ''; ?> with unpaid rig fees totaling
+                <strong>GHS <?php echo number_format($unpaidRigFees['total_amount'], 2); ?></strong>
+            </p>
+            <a href="financial.php" class="floating-alert-link">Review in Finance →</a>
         </div>
-        <a href="financial.php" class="btn btn-primary" style="width: 100%; font-size: 14px; padding: 10px;">
-            View →
-        </a>
     </div>
     <?php endif; ?>
 
-    <!-- Card 2: Outstanding Debts Requiring Attention -->
-    <?php if (intval($debtRecoveryAlert['count'] ?? 0) > 0): ?>
-    <div class="dashboard-card" style="background: linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(239,68,68,0.05) 100%); border: 2px solid rgba(239,68,68,0.3); border-left: 4px solid #ef4444; padding: 20px;">
-        <div style="display: flex; align-items: start; gap: 12px; margin-bottom: 16px;">
-            <div style="font-size: 32px; color: #ef4444;">⚠️</div>
-            <div style="flex: 1;">
-                <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #ef4444;">Outstanding Debts Requiring Attention</h3>
-                <div style="margin-top: 8px;">
-                    <div style="margin-bottom: 6px;">
-                        <span style="font-size: 13px; color: var(--secondary);">Outstanding Debts:</span>
-                        <strong style="font-size: 15px; color: var(--text); margin-left: 8px;"><?php echo number_format($debtRecoveryAlert['count'] ?? 0); ?></strong>
-                    </div>
-                    <div>
-                        <span style="font-size: 13px; color: var(--secondary);">Total Amount:</span>
-                        <strong style="font-size: 15px; color: #ef4444; margin-left: 8px;">GHS <?php echo number_format($debtRecoveryAlert['total_amount'] ?? 0, 2); ?></strong>
-                    </div>
-                </div>
-            </div>
+    <?php if ($showDebtAlert): ?>
+    <div class="floating-alert danger" data-alert-key="debt-recovery">
+        <button type="button" class="floating-alert-close" data-close-alert aria-label="Dismiss debt recovery alert">×</button>
+        <div class="floating-alert-icon" aria-hidden="true">⚠️</div>
+        <div class="floating-alert-content">
+            <h3>Outstanding Debts</h3>
+            <p>
+                <span><?php echo number_format($debtRecoveryAlert['count'] ?? 0); ?> account<?php echo ($debtRecoveryAlert['count'] ?? 0) != 1 ? 's' : ''; ?> pending</span><br>
+            </p>
+            <p>
+                Total amount: <strong>GHS <?php echo number_format($debtRecoveryAlert['total_amount'] ?? 0, 2); ?></strong>
+            </p>
+            <a href="debt-recovery.php" class="floating-alert-link">Follow up now →</a>
         </div>
-        <a href="debt-recovery.php" class="btn btn-primary" style="width: 100%; font-size: 14px; padding: 10px;">
-            View & Follow Up →
-        </a>
     </div>
     <?php endif; ?>
 </div>
 <?php endif; ?>
 
-<!-- Responsive: Stack on mobile -->
 <style>
-.alerts-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-    margin-bottom: 24px;
+.floating-debt-alerts {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 1200;
+    max-width: min(320px, calc(100% - 32px));
 }
 
-@media (max-width: 1024px) {
-    .alerts-grid {
-        grid-template-columns: 1fr;
+.floating-alert {
+    position: relative;
+    display: flex;
+    gap: 12px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border: 1px solid rgba(15, 118, 110, 0.2);
+    background: linear-gradient(135deg, rgba(13,148,136,0.12) 0%, rgba(13,148,136,0.05) 100%);
+    box-shadow: 0 12px 24px rgba(15,23,42,0.15);
+    color: var(--text);
+    backdrop-filter: blur(6px);
+}
+
+.floating-alert.danger {
+    border-color: rgba(239, 68, 68, 0.35);
+    background: linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(239,68,68,0.06) 100%);
+}
+
+.floating-alert h3 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.floating-alert p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--secondary);
+}
+
+.floating-alert strong {
+    color: inherit;
+}
+
+.floating-alert-icon {
+    font-size: 28px;
+    line-height: 28px;
+}
+
+.floating-alert-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.floating-alert-link:hover {
+    text-decoration: underline;
+}
+
+.floating-alert-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--secondary);
+}
+
+@media (max-width: 768px) {
+    .floating-debt-alerts {
+        top: 16px;
+        right: 16px;
+        left: 16px;
+        max-width: none;
     }
 }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const container = document.getElementById('floatingDebtAlerts');
+    if (!container) {
+        return;
+    }
+
+    const alerts = container.querySelectorAll('.floating-alert');
+    alerts.forEach(alert => {
+        const key = alert.dataset.alertKey;
+        const storageKey = `dashboard-hide-${key}`;
+
+        if (sessionStorage.getItem(storageKey) === '1') {
+            alert.remove();
+            return;
+        }
+
+        const closeBtn = alert.querySelector('[data-close-alert]');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                alert.remove();
+                sessionStorage.setItem(storageKey, '1');
+                if (!container.querySelector('.floating-alert')) {
+                    container.remove();
+                }
+            });
+        }
+    });
+
+    if (!container.querySelector('.floating-alert')) {
+        container.remove();
+    }
+});
+</script>
+
+<?php if ($showOperational || $showCRM || $showFinancial): ?>
+<!-- Analytics & Trends -->
+<div class="section-header" style="margin-top: 18px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h2 class="section-title">Analytics & Trends</h2>
+            <p style="margin: 4px 0 0 0; color: var(--secondary); font-size: 13px;">
+                Click any chart to view detailed analysis
+            </p>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="analytics.php" class="btn btn-sm btn-primary" title="View Full Analytics Dashboard">
+                📊 Full Analytics
+            </a>
+            <button onclick="refreshCharts()" class="btn btn-sm btn-outline" title="Refresh Charts">
+                🔄 Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));">
+    <?php if ($showFinancial): ?>
+    <!-- Revenue Trend Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('overview')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">📈 Revenue & Profit Trend</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="revenueChart" style="max-height: 100%;"></canvas>
+            <div id="revenueChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($showFinancial): ?>
+    <!-- Profit Analysis Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('financial')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">💰 Income vs Expenses</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="profitChart" style="max-height: 100%;"></canvas>
+            <div id="profitChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($showOperational): ?>
+    <!-- Rig Performance Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('performance')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">🏆 Rig Performance</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="rigPerformanceChart" style="max-height: 100%;"></canvas>
+            <div id="rigPerformanceChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($showCRM || $showFinancial): ?>
+    <!-- Client Revenue Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('financial')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">🏢 Top Clients Revenue</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="clientRevenueChart" style="max-height: 100%;"></canvas>
+            <div id="clientRevenueChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($showOperational || $showFinancial): ?>
+    <!-- Job Type Analysis Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('financial')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">📋 Job Type Analysis</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="jobTypeChart" style="max-height: 100%;"></canvas>
+            <div id="jobTypeChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($showOperational): ?>
+    <!-- Operational Metrics Chart -->
+    <div class="dashboard-card" onclick="navigateToAnalytics('operational')" style="cursor: pointer;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">⚙️ Operational Metrics</h3>
+            <span style="font-size: 11px; color: var(--primary); font-weight: 500;">Click to view details →</span>
+        </div>
+        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
+            <canvas id="operationalChart" style="max-height: 100%;"></canvas>
+            <div id="operationalChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
+                Loading chart data...
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+</div>
 
 <!-- Key Performance Indicators - Boreholes & Clients -->
 <div class="kpi-hero-section">
@@ -1007,10 +1914,11 @@ try {
 </div>
 
 <!-- Operations Snapshot -->
-<div class="section-header" style="margin-top: 8px;">
+<div class="section-header" style="margin-top: 16px;">
     <h2 class="section-title">Operations Snapshot</h2>
     <div style="font-size: 12px; color: var(--secondary);">Live glance across Resources, CRM, and System</div>
 </div>
+
 <div class="metric-grid">
     <div class="kpi-card">
         <div class="kpi-card-title">Materials Items</div>
@@ -1054,16 +1962,19 @@ try {
     </div>
 </div>
 
+<?php endif; ?>
+
+<?php if ($showFinancial): ?>
 <!-- Today's Quick Stats -->
 <div class="stats-grid">
-    <div class="stat-card">
+    <div class="stat-card" style="border-left: 4px solid var(--wp-blue);">
         <div class="stat-icon">📊</div>
         <div class="stat-info">
             <h3><?php echo number_format(getStat($stats['today'], 'total_reports_today', 0)); ?></h3>
             <p>Reports Today</p>
         </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="border-left: 4px solid var(--success-green);">
         <div class="stat-icon">💰</div>
         <div class="stat-info">
             <h3>GHS <?php echo number_format(getStat($stats['today'], 'total_income_today', 0), 2); ?></h3>
@@ -1086,7 +1997,7 @@ try {
             <?php endif; ?>
         </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="border-left: 4px solid var(--success-green);">
         <div class="stat-icon">📈</div>
         <div class="stat-info">
             <h3>GHS <?php echo number_format(getStat($stats['today'], 'net_profit_today', 0), 2); ?></h3>
@@ -1109,7 +2020,7 @@ try {
             <?php endif; ?>
         </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="border-left: 4px solid var(--wp-blue);">
         <div class="stat-icon">🏦</div>
         <div class="stat-info">
             <h3>GHS <?php echo number_format(getStat($stats['today'], 'money_banked_today', 0), 2); ?></h3>
@@ -1154,15 +2065,15 @@ try {
             <?php 
             // Calculate trend vs last month average
             $thisMonthReports = getStat($stats['this_month'], 'total_reports_this_month', 0);
-            $lastMonthReports = getStat($stats['overall'], 'total_reports', 0) - $thisMonthReports;
+            $lastMonthReports = getStat($stats['growth'], 'last_month_jobs', 0);
             $thisMonthAvg = $thisMonthReports > 0 
                 ? (getStat($stats['this_month'], 'total_income_this_month', 0) / $thisMonthReports)
                 : 0;
             $lastMonthAvg = $lastMonthReports > 0
                 ? (getStat($stats['growth'], 'last_month_revenue', 0) / $lastMonthReports)
                 : 0;
-            $avgTrend = $lastMonthAvg > 0 ? (($thisMonthAvg - $lastMonthAvg) / $lastMonthAvg) * 100 : 0;
-            if ($lastMonthAvg > 0) echo formatTrend($avgTrend, false);
+            $avgTrend = $lastMonthAvg > 0 ? (($thisMonthAvg - $lastMonthAvg) / $lastMonthAvg) * 100 : ($thisMonthAvg > 0 && $lastMonthAvg == 0 ? 100 : 0);
+            if ($lastMonthAvg > 0 || $thisMonthAvg > 0) echo formatTrend($avgTrend, false);
             ?>
         </div>
         <div class="kpi-card-value">
@@ -1178,14 +2089,24 @@ try {
             <span class="kpi-card-title">Avg Profit per Job</span>
             <?php 
             // Calculate trend vs last month average
+            $thisMonthReports = getStat($stats['this_month'], 'total_reports_this_month', 0);
+            $lastMonthReports = getStat($stats['growth'], 'last_month_jobs', 0);
             $thisMonthProfitAvg = $thisMonthReports > 0 
                 ? (getStat($stats['this_month'], 'total_profit_this_month', 0) / $thisMonthReports)
                 : 0;
             $lastMonthProfitAvg = $lastMonthReports > 0
                 ? (getStat($stats['growth'], 'last_month_profit', 0) / $lastMonthReports)
                 : 0;
-            $profitAvgTrend = $lastMonthProfitAvg != 0 ? (($thisMonthProfitAvg - $lastMonthProfitAvg) / abs($lastMonthProfitAvg)) * 100 : 0;
-            if ($lastMonthProfitAvg != 0) echo formatTrend($profitAvgTrend, false);
+            // Calculate profit trend safely
+            $profitAvgTrend = 0;
+            if ($lastMonthProfitAvg != 0) {
+                $profitAvgTrend = (($thisMonthProfitAvg - $lastMonthProfitAvg) / abs($lastMonthProfitAvg)) * 100;
+            } elseif ($thisMonthProfitAvg > 0 && $lastMonthProfitAvg == 0) {
+                $profitAvgTrend = 100;
+            } elseif ($thisMonthProfitAvg < 0 && $lastMonthProfitAvg == 0) {
+                $profitAvgTrend = -100;
+            }
+            if ($lastMonthProfitAvg != 0 || $thisMonthProfitAvg != 0) echo formatTrend($profitAvgTrend, false);
             ?>
         </div>
         <div class="kpi-card-value">
@@ -1525,9 +2446,12 @@ try {
         </div>
     </div>
 </div>
+<?php endif; ?>
 
+<?php if ($showCRM || $showOperational || $showFinancial): ?>
 <!-- Top Performers -->
 <div class="dashboard-grid" style="margin-top: 16px;">
+    <?php if ($showCRM || $showFinancial): ?>
     <!-- Top Clients -->
     <div class="dashboard-card">
         <h2>Top Performing Clients</h2>
@@ -1560,7 +2484,9 @@ try {
             <p class="no-data">No client data available</p>
         <?php endif; ?>
     </div>
+    <?php endif; ?>
     
+    <?php if ($showOperational): ?>
     <!-- Top Rigs (RPM-based) -->
     <div class="dashboard-card">
         <h2>🚛 Rig Performance Overview (RPM-Based)</h2>
@@ -1619,8 +2545,11 @@ try {
             <p class="no-data">No rig performance data available</p>
         <?php endif; ?>
     </div>
+    <?php endif; ?>
 </div>
+<?php endif; ?>
 
+<?php if ($showOperational || $showFinancial): ?>
 <!-- Job Type Distribution -->
 <div class="dashboard-card" style="margin-top: 16px;">
     <h2>Job Type Distribution</h2>
@@ -1664,7 +2593,9 @@ try {
         <p class="no-data">No job type data available</p>
     <?php endif; ?>
 </div>
+<?php endif; ?>
 
+<?php if ($showOperational || $showCRM || $showFinancial): ?>
 <!-- Recent Activity -->
 <div class="dashboard-card" style="margin-top: 16px;">
     <h2>🕐 Recent Activity</h2>
@@ -1690,59 +2621,7 @@ try {
         <?php endif; ?>
     </div>
 </div>
-
-<!-- Analytics Charts Section -->
-<div class="section-header" style="margin-top: 16px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-        <h2 class="section-title">Analytics & Trends</h2>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button onclick="refreshCharts()" class="btn btn-sm btn-outline" title="Refresh Charts">
-                🔄 Refresh
-            </button>
-            <button onclick="exportChart('revenue')" class="btn btn-sm btn-outline" title="Export Chart Data">
-                📥 Export Data
-            </button>
-            <button onclick="exportChartAsImage('revenueChart')" class="btn btn-sm btn-outline" title="Export as Image">
-                📷 Image
-            </button>
-            <a href="export.php?module=reports&format=pdf" class="btn btn-sm btn-outline" title="Export Full Report as PDF" target="_blank">
-                📄 PDF
-            </a>
-        </div>
-    </div>
-</div>
-
-<div class="dashboard-grid">
-    <!-- Revenue Trend Chart -->
-    <div class="dashboard-card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">📈 Revenue & Profit Trend</h3>
-            <span style="font-size: 11px; color: var(--secondary);">Click to drill down</span>
-        </div>
-        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
-            <canvas id="revenueChart" style="max-height: 100%; cursor: pointer;"></canvas>
-            <div id="revenueChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
-                Loading chart data...
-            </div>
-        </div>
-    </div>
-    
-    <!-- Profit Analysis Chart -->
-    <div class="dashboard-card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="font-size: 14px; font-weight: 600; color: var(--text); margin: 0;">💰 Income vs Expenses</h3>
-            <span style="font-size: 11px; color: var(--secondary);">Click to drill down</span>
-        </div>
-        <div style="height: 300px; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: 6px; position: relative;">
-            <canvas id="profitChart" style="max-height: 100%; cursor: pointer;"></canvas>
-            <div id="profitChartLoading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--secondary); font-size: 14px; display: none;">
-                Loading chart data...
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Quick Actions moved to bottom -->
+<?php endif; ?>
 
 <!-- Reports & Receipts Section -->
 <div class="dashboard-card" style="margin-top: 16px; border-left: 4px solid #0ea5e9;">
@@ -1782,7 +2661,7 @@ try {
             <a href="field-reports.php" class="btn btn-primary">📝 Create First Report</a>
         </div>
     <?php else: ?>
-        <div style="overflow-x: auto;">
+        <div style="overflow-x: auto; overflow-y: visible; position: relative;">
             <table class="data-table" style="margin-top: 0;">
                 <thead>
                     <tr>
@@ -1862,45 +2741,10 @@ try {
     </div>
 </div>
 
-<!-- AI Insights (lightweight baseline) -->
-<div class="dashboard-card" style="margin-top: 16px;">
+<!-- AI Insights (lightweight baseline) - Full Width -->
+<div class="dashboard-card" style="margin-top: 24px;">
     <h2>🤖 AI Insights</h2>
     <div id="aiInsights" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:12px;"></div>
-</div>
-
-<!-- Quick Actions -->
-<div class="dashboard-card" style="margin-top: 16px;">
-    <h2>Quick Actions</h2>
-    <div class="action-buttons" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-        <a href="field-reports.php" class="action-btn">
-            <span class="action-icon" style="font-size: 20px; opacity: 0.7;">📝</span>
-            <span>New Field Report</span>
-        </a>
-        <a href="payroll.php" class="action-btn">
-            <span class="action-icon" style="font-size: 20px; opacity: 0.7;">💰</span>
-            <span>Process Payroll</span>
-        </a>
-        <a href="resources.php?action=materials" class="action-btn">
-            <span class="action-icon" style="font-size: 20px; opacity: 0.7;">📦</span>
-            <span>Manage Materials</span>
-        </a>
-        <a href="finance.php" class="action-btn">
-            <span class="action-icon" style="font-size: 20px; opacity: 0.7;">📊</span>
-            <span>Financial Reports</span>
-        </a>
-    </div>
-    <style>
-        @media (max-width: 900px) {
-            .dashboard-card .action-buttons {
-                grid-template-columns: repeat(2, 1fr) !important;
-            }
-        }
-        @media (max-width: 500px) {
-            .dashboard-card .action-buttons {
-                grid-template-columns: 1fr !important;
-            }
-        }
-    </style>
 </div>
 
 <script>
@@ -1928,33 +2772,60 @@ try {
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-// Initialize charts after DOM and main.js are loaded
+// Wait for Chart.js to load
 (function() {
+    function checkChartJs() {
+        if (typeof Chart === 'undefined') {
+            console.warn('Chart.js not loaded yet, retrying...');
+            setTimeout(checkChartJs, 100);
+            return;
+        }
+        initDashboard();
+    }
+    
     function initDashboard() {
         // Ensure theme toggle is working (main.js should handle this, but ensure it's working)
-        if (window.abbisApp) {
+        if (window.abbisApp && typeof window.abbisApp.initializeTheme === 'function') {
             window.abbisApp.initializeTheme();
         }
         
-        // Initialize simple analytics charts
-        loadDashboardCharts();
+        // Initialize simple analytics charts only if Chart.js is available
+        if (typeof Chart !== 'undefined') {
+            loadDashboardCharts();
+        } else {
+            console.error('Chart.js is not available. Charts will not be loaded.');
+        }
     }
     
-    // Run when DOM is ready and main.js is loaded
+    // Run when DOM is ready and Chart.js is loaded
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
-            // Wait a bit to ensure main.js has loaded
-            setTimeout(initDashboard, 50);
+            // Wait for Chart.js to be available
+            setTimeout(checkChartJs, 50);
         });
     } else {
         // DOM already loaded
-        setTimeout(initDashboard, 50);
+        setTimeout(checkChartJs, 50);
     }
 })();
 
 // Global chart instances
 let revenueChart = null;
 let profitChart = null;
+let rigPerformanceChart = null;
+let clientRevenueChart = null;
+let jobTypeChart = null;
+let operationalChart = null;
+
+// Navigate to analytics page
+function navigateToAnalytics(tab = 'overview') {
+    const filters = getFilters();
+    const params = new URLSearchParams({
+        type: tab,
+        ...filters
+    });
+    window.location.href = `analytics.php?${params}`;
+}
 
 function loadDashboardCharts() {
     loadEnhancedCharts();
@@ -1969,16 +2840,22 @@ function loadEnhancedCharts() {
     
     // Load Profit Analysis Chart with real data
     loadProfitChart(filters);
+    
+    // Load additional charts
+    loadRigPerformanceChart(filters);
+    loadClientRevenueChart(filters);
+    loadJobTypeChart(filters);
+    loadOperationalChart(filters);
 }
 
 function getFilters() {
     return {
-        start_date: document.getElementById('filterDateFrom')?.value || '<?php echo date('Y-m-01'); ?>',
-        end_date: document.getElementById('filterDateTo')?.value || '<?php echo date('Y-m-t'); ?>',
+        start_date: document.getElementById('filterDateFrom')?.value || '<?php echo $defaultStartDate; ?>',
+        end_date: document.getElementById('filterDateTo')?.value || '<?php echo $defaultEndDate; ?>',
         rig_id: document.getElementById('filterRig')?.value || '',
         client_id: document.getElementById('filterClient')?.value || '',
         job_type: document.getElementById('filterJobType')?.value || '',
-        group_by: 'month'
+        group_by: document.getElementById('filterGroupBy')?.value || '<?php echo $groupBy; ?>'
     };
 }
 
@@ -2032,7 +2909,23 @@ function loadRevenueChart(filters) {
 
 function createRevenueChart(labels, revenue, profit = [], forecastLabels = [], forecastData = []) {
     const revenueCtx = document.getElementById('revenueChart');
+    const loadingDiv = document.getElementById('revenueChartLoading');
     if (!revenueCtx) return;
+    
+    // Check if Chart.js is available
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not available');
+        if (loadingDiv) loadingDiv.innerHTML = '<p style="color: var(--danger);">Chart library not loaded</p>';
+        return;
+    }
+    
+    // Hide loading indicator
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    
+    // Destroy existing chart
+    if (revenueChart) {
+        revenueChart.destroy();
+    }
     
     revenueChart = new Chart(revenueCtx, {
         type: 'line',
@@ -2109,9 +3002,7 @@ function createRevenueChart(labels, revenue, profit = [], forecastLabels = [], f
                 }
             },
             onClick: (event, elements) => {
-                if (elements.length > 0) {
-                    drillDownChart('revenue', elements[0].index);
-                }
+                navigateToAnalytics('overview');
             }
         }
     });
@@ -2172,13 +3063,30 @@ function exportChart(chartType) {
 function exportChartAsImage(canvasId) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) {
-        showNotification('Chart not found', 'error');
+        if (typeof showNotification === 'function') {
+            showNotification('Chart not found', 'error');
+        } else {
+            console.error('Chart not found');
+        }
         return;
     }
     
     const chart = window[canvasId.replace('Chart', '') + 'Chart'];
     if (!chart) {
-        showNotification('Chart instance not found', 'error');
+        if (typeof showNotification === 'function') {
+            showNotification('Chart instance not found', 'error');
+        } else {
+            console.error('Chart instance not found');
+        }
+        return;
+    }
+    
+    if (typeof chart.toBase64Image !== 'function') {
+        if (typeof showNotification === 'function') {
+            showNotification('Chart export not supported', 'error');
+        } else {
+            console.error('Chart export not supported');
+        }
         return;
     }
     
@@ -2191,7 +3099,9 @@ function exportChartAsImage(canvasId) {
     link.href = url;
     link.click();
     
-    showNotification('Chart exported as image', 'success');
+    if (typeof showNotification === 'function') {
+        showNotification('Chart exported as image', 'success');
+    }
 }
 
 function refreshCharts() {
@@ -2203,8 +3113,26 @@ function refreshCharts() {
         profitChart.destroy();
         profitChart = null;
     }
+    if (rigPerformanceChart) {
+        rigPerformanceChart.destroy();
+        rigPerformanceChart = null;
+    }
+    if (clientRevenueChart) {
+        clientRevenueChart.destroy();
+        clientRevenueChart = null;
+    }
+    if (jobTypeChart) {
+        jobTypeChart.destroy();
+        jobTypeChart = null;
+    }
+    if (operationalChart) {
+        operationalChart.destroy();
+        operationalChart = null;
+    }
     loadEnhancedCharts();
-    showNotification('Charts refreshed', 'success');
+    if (typeof showNotification === 'function') {
+        showNotification('Charts refreshed', 'success');
+    }
 }
 
 function showNotification(message, type = 'info') {
@@ -2235,6 +3163,12 @@ function showNotification(message, type = 'info') {
 function createProfitChart(income, expenses, profit) {
     const profitCtx = document.getElementById('profitChart');
     if (!profitCtx) return;
+    
+    // Check if Chart.js is available
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not available');
+        return;
+    }
     
     profitChart = new Chart(profitCtx, {
         type: 'bar',
@@ -2282,9 +3216,415 @@ function createProfitChart(income, expenses, profit) {
                 }
             },
             onClick: (event, elements) => {
-                if (elements.length > 0) {
-                    drillDownChart('profit', elements[0].index);
+                navigateToAnalytics('financial');
+            }
+        }
+    });
+}
+
+// Load Rig Performance Chart
+function loadRigPerformanceChart(filters) {
+    const ctx = document.getElementById('rigPerformanceChart');
+    const loadingDiv = document.getElementById('rigPerformanceChartLoading');
+    if (!ctx) return;
+    
+    if (loadingDiv) loadingDiv.style.display = 'block';
+    if (rigPerformanceChart) {
+        rigPerformanceChart.destroy();
+    }
+    
+    const params = new URLSearchParams({
+        type: 'rig_performance',
+        ...filters
+    });
+    
+    fetch(`../api/analytics-api.php?${params}`)
+        .then(r => r.json())
+        .then(res => {
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            
+            if (!res.success || !res.data || res.data.length === 0) {
+                createRigPerformanceChart([], []);
+                return;
+            }
+            
+            const labels = res.data.map(item => item.rig_name || item.rig_code || 'Unknown');
+            const profits = res.data.map(item => parseFloat(item.total_profit || 0));
+            
+            createRigPerformanceChart(labels, profits);
+        })
+        .catch(err => {
+            console.error('Error loading rig performance chart:', err);
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            createRigPerformanceChart([], []);
+        });
+}
+
+function createRigPerformanceChart(labels, profits) {
+    const ctx = document.getElementById('rigPerformanceChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    
+    if (rigPerformanceChart) {
+        rigPerformanceChart.destroy();
+    }
+    
+    rigPerformanceChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels.length > 0 ? labels : ['No Data'],
+            datasets: [{
+                label: 'Total Profit (GHS)',
+                data: profits.length > 0 ? profits : [0],
+                backgroundColor: 'rgba(14,165,233,0.8)',
+                borderRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'GHS ' + context.parsed.y.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
                 }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                    ticks: {
+                        callback: function(value) {
+                            return 'GHS ' + value.toLocaleString();
+                        }
+                    }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            },
+            onClick: () => {
+                navigateToAnalytics('performance');
+            }
+        }
+    });
+}
+
+// Load Client Revenue Chart
+function loadClientRevenueChart(filters) {
+    const ctx = document.getElementById('clientRevenueChart');
+    const loadingDiv = document.getElementById('clientRevenueChartLoading');
+    if (!ctx) return;
+    
+    if (loadingDiv) loadingDiv.style.display = 'block';
+    if (clientRevenueChart) {
+        clientRevenueChart.destroy();
+    }
+    
+    const params = new URLSearchParams({
+        type: 'client_analysis',
+        ...filters
+    });
+    
+    fetch(`../api/analytics-api.php?${params}`)
+        .then(r => r.json())
+        .then(res => {
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            
+            if (!res.success || !res.data || res.data.length === 0) {
+                createClientRevenueChart([], []);
+                return;
+            }
+            
+            // Get top 5 clients
+            const topClients = res.data.slice(0, 5);
+            const labels = topClients.map(item => item.client_name || 'Unknown');
+            const revenues = topClients.map(item => parseFloat(item.total_revenue || 0));
+            
+            createClientRevenueChart(labels, revenues);
+        })
+        .catch(err => {
+            console.error('Error loading client revenue chart:', err);
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            createClientRevenueChart([], []);
+        });
+}
+
+function createClientRevenueChart(labels, revenues) {
+    const ctx = document.getElementById('clientRevenueChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    
+    if (clientRevenueChart) {
+        clientRevenueChart.destroy();
+    }
+    
+    clientRevenueChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels.length > 0 ? labels : ['No Data'],
+            datasets: [{
+                data: revenues.length > 0 ? revenues : [0],
+                backgroundColor: [
+                    'rgba(14,165,233,0.8)',
+                    'rgba(16,185,129,0.8)',
+                    'rgba(245,158,11,0.8)',
+                    'rgba(239,68,68,0.8)',
+                    'rgba(139,92,246,0.8)'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        padding: 8,
+                        font: { size: 11 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) : 0;
+                            return context.label + ': GHS ' + context.parsed.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            }) + ' (' + percentage + '%)';
+                        }
+                    }
+                }
+            },
+            onClick: () => {
+                navigateToAnalytics('financial');
+            }
+        }
+    });
+}
+
+// Load Job Type Chart
+function loadJobTypeChart(filters) {
+    const ctx = document.getElementById('jobTypeChart');
+    const loadingDiv = document.getElementById('jobTypeChartLoading');
+    if (!ctx) return;
+    
+    if (loadingDiv) loadingDiv.style.display = 'block';
+    if (jobTypeChart) {
+        jobTypeChart.destroy();
+    }
+    
+    const params = new URLSearchParams({
+        type: 'job_type_analysis',
+        ...filters
+    });
+    
+    fetch(`../api/analytics-api.php?${params}`)
+        .then(r => r.json())
+        .then(res => {
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            
+            if (!res.success || !res.data || res.data.length === 0) {
+                createJobTypeChart([], []);
+                return;
+            }
+            
+            const labels = res.data.map(item => (item.job_type || 'Unknown').charAt(0).toUpperCase() + (item.job_type || 'Unknown').slice(1));
+            const profits = res.data.map(item => parseFloat(item.total_profit || 0));
+            
+            createJobTypeChart(labels, profits);
+        })
+        .catch(err => {
+            console.error('Error loading job type chart:', err);
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            createJobTypeChart([], []);
+        });
+}
+
+function createJobTypeChart(labels, profits) {
+    const ctx = document.getElementById('jobTypeChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    
+    if (jobTypeChart) {
+        jobTypeChart.destroy();
+    }
+    
+    jobTypeChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels.length > 0 ? labels : ['No Data'],
+            datasets: [{
+                data: profits.length > 0 ? profits : [0],
+                backgroundColor: [
+                    'rgba(14,165,233,0.8)',
+                    'rgba(16,185,129,0.8)',
+                    'rgba(245,158,11,0.8)',
+                    'rgba(239,68,68,0.8)'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        padding: 8,
+                        font: { size: 11 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.label + ': GHS ' + context.parsed.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            });
+                        }
+                    }
+                }
+            },
+            onClick: () => {
+                navigateToAnalytics('financial');
+            }
+        }
+    });
+}
+
+// Load Operational Chart
+function loadOperationalChart(filters) {
+    const ctx = document.getElementById('operationalChart');
+    const loadingDiv = document.getElementById('operationalChartLoading');
+    if (!ctx) return;
+    
+    if (loadingDiv) loadingDiv.style.display = 'block';
+    if (operationalChart) {
+        operationalChart.destroy();
+    }
+    
+    const params = new URLSearchParams({
+        type: 'time_series',
+        ...filters
+    });
+    
+    fetch(`../api/analytics-api.php?${params}`)
+        .then(r => r.json())
+        .then(res => {
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            
+            if (!res.success || !res.data || res.data.length === 0) {
+                createOperationalChart([], [], []);
+                return;
+            }
+            
+            const labels = res.data.map(item => formatPeriodLabel(item.period));
+            const depths = res.data.map(item => parseFloat(item.avg_depth || 0));
+            const durations = res.data.map(item => parseFloat(item.avg_duration || 0));
+            
+            createOperationalChart(labels, depths, durations);
+        })
+        .catch(err => {
+            console.error('Error loading operational chart:', err);
+            if (loadingDiv) loadingDiv.style.display = 'none';
+            createOperationalChart([], [], []);
+        });
+}
+
+function createOperationalChart(labels, depths, durations) {
+    const ctx = document.getElementById('operationalChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    
+    if (operationalChart) {
+        operationalChart.destroy();
+    }
+    
+    operationalChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels.length > 0 ? labels : ['No Data'],
+            datasets: [
+                {
+                    label: 'Avg Depth (ft)',
+                    data: depths.length > 0 ? depths : [0],
+                    borderColor: '#0ea5e9',
+                    backgroundColor: 'rgba(14,165,233,0.1)',
+                    tension: 0.4,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Avg Duration (min)',
+                    data: durations.length > 0 ? durations : [0],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.1)',
+                    tension: 0.4,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            if (context.datasetIndex === 0) {
+                                return 'Avg Depth: ' + context.parsed.y.toFixed(2) + ' ft';
+                            } else {
+                                return 'Avg Duration: ' + context.parsed.y.toFixed(0) + ' min';
+                            }
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Depth (ft)'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Duration (min)'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            },
+            onClick: () => {
+                navigateToAnalytics('operational');
             }
         }
     });
@@ -2293,6 +3633,10 @@ function createProfitChart(income, expenses, profit) {
 function formatPeriodLabel(period) {
     if (!period) return '';
     // Handle different period formats
+    if (period.includes('Q')) {
+        const [year, quarter] = period.split('-Q');
+        return `Q${(quarter || '').trim()} ${year}`;
+    }
     if (period.includes('-')) {
         const parts = period.split('-');
         if (parts.length === 3) {
@@ -2300,10 +3644,17 @@ function formatPeriodLabel(period) {
             const date = new Date(period);
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         } else if (parts.length === 2) {
+            const numeric = parseInt(parts[1], 10);
+            if (!Number.isNaN(numeric) && numeric > 12) {
+                // Treat as ISO week (YYYY-WW)
+                return `Week ${numeric}, ${parts[0]}`;
+            }
             // YYYY-MM
             const date = new Date(period + '-01');
             return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
         }
+    } else if (/^\d{4}$/.test(period)) {
+        return period;
     }
     return period;
 }
@@ -2357,12 +3708,73 @@ function applyFilters() {
 }
 
 function resetFilters() {
-    document.getElementById('filterDateFrom').value = '<?php echo date('Y-m-01'); ?>';
-    document.getElementById('filterDateTo').value = '<?php echo date('Y-m-t'); ?>';
+    const groupByInput = document.getElementById('filterGroupBy');
+    document.getElementById('filterDateFrom').value = '<?php echo $defaultStartDate; ?>';
+    document.getElementById('filterDateTo').value = '<?php echo $defaultEndDate; ?>';
     document.getElementById('filterRig').value = '';
     document.getElementById('filterClient').value = '';
     document.getElementById('filterJobType').value = '';
+    if (groupByInput) {
+        groupByInput.value = 'month';
+    }
+    document.querySelectorAll('.range-selector .range-btn').forEach(btn => btn.classList.remove('active'));
+    const defaultButton = document.querySelector('.range-selector .range-btn[data-range="ytd"]');
+    if (defaultButton) {
+        defaultButton.classList.add('active');
+    }
     applyFilters();
+}
+
+function setupQuickRangeFilters() {
+    const rangeButtons = Array.from(document.querySelectorAll('.range-selector .range-btn'));
+    const dateFrom = document.getElementById('filterDateFrom');
+    const dateTo = document.getElementById('filterDateTo');
+    const groupByInput = document.getElementById('filterGroupBy');
+    
+    if (rangeButtons.length === 0 || !dateFrom || !dateTo || !groupByInput) {
+        return;
+    }
+    
+    const activateButton = (button, shouldApply = true) => {
+        rangeButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        if (button.dataset.start) {
+            dateFrom.value = button.dataset.start;
+        }
+        if (button.dataset.end) {
+            dateTo.value = button.dataset.end;
+        }
+        if (button.dataset.group) {
+            groupByInput.value = button.dataset.group;
+        }
+        if (shouldApply) {
+            applyFilters();
+        }
+    };
+    
+    rangeButtons.forEach(button => {
+        button.addEventListener('click', () => activateButton(button, true));
+    });
+    
+    [dateFrom, dateTo].forEach(input => {
+        input.addEventListener('input', () => {
+            rangeButtons.forEach(btn => btn.classList.remove('active'));
+        });
+    });
+    
+    const presetActive = rangeButtons.find(btn => btn.classList.contains('active'))
+        || document.querySelector('.range-selector .range-btn[data-default="true"]');
+    if (presetActive) {
+        if (presetActive.dataset.group) {
+            groupByInput.value = presetActive.dataset.group;
+        }
+        if (presetActive.dataset.start && dateFrom.value !== presetActive.dataset.start) {
+            dateFrom.value = presetActive.dataset.start;
+        }
+        if (presetActive.dataset.end && dateTo.value !== presetActive.dataset.end) {
+            dateTo.value = presetActive.dataset.end;
+        }
+    }
 }
 
 function exportDashboard(format, section = 'all') {
@@ -2499,6 +3911,7 @@ function loadDashboardAlerts() {
 
 // Initialize alerts on page load
 document.addEventListener('DOMContentLoaded', function() {
+    setupQuickRangeFilters();
     loadDashboardAlerts();
     
     // Auto-refresh alerts every 5 minutes
@@ -3009,20 +4422,25 @@ document.addEventListener('keydown', function(e) {
 // Toggle action dropdown
 function toggleActionDropdown(reportId) {
     const menu = document.getElementById('action-menu-' + reportId);
+    if (!menu) return;
+    
     const allMenus = document.querySelectorAll('.action-dropdown-menu');
     
     // Close all other dropdowns
     allMenus.forEach(m => {
         if (m.id !== 'action-menu-' + reportId) {
+            m.classList.remove('show');
             m.style.display = 'none';
         }
     });
     
     // Toggle current dropdown
-    if (menu.style.display === 'none' || menu.style.display === '') {
-        menu.style.display = 'block';
-    } else {
+    if (menu.classList.contains('show') || menu.style.display === 'block') {
+        menu.classList.remove('show');
         menu.style.display = 'none';
+    } else {
+        menu.classList.add('show');
+        menu.style.display = 'block';
     }
 }
 
@@ -3030,6 +4448,7 @@ function toggleActionDropdown(reportId) {
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.action-dropdown')) {
         document.querySelectorAll('.action-dropdown-menu').forEach(menu => {
+            menu.classList.remove('show');
             menu.style.display = 'none';
         });
     }
@@ -3052,6 +4471,7 @@ function deleteReport(event, reportId, reportIdText) {
     
     // Close dropdown
     document.querySelectorAll('.action-dropdown-menu').forEach(menu => {
+        menu.classList.remove('show');
         menu.style.display = 'none';
     });
     
@@ -3104,30 +4524,8 @@ function deleteReport(event, reportId, reportIdText) {
     });
 }
 
-// Simple notification function
-function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 20px;
-        background: ${type === 'success' ? '#10b981' : '#ef4444'};
-        color: white;
-        border-radius: 6px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        z-index: 10001;
-        font-size: 14px;
-        animation: slideIn 0.3s ease;
-    `;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
+// showNotification is already defined above, so we don't need to redefine it
+// This duplicate definition is removed to prevent conflicts
 
 // Add CSS animations for notifications
 if (!document.getElementById('notification-styles')) {
@@ -3162,5 +4560,13 @@ if (!document.getElementById('notification-styles')) {
     document.head.appendChild(style);
 }
 </script>
-<?php require_once '../includes/footer.php'; ?>
+</div>
+
+<?php
+// Note: AI assistant panel is already included in header.php for all pages
+// The context variables ($aiContext and $aiQuickPrompts) were set before the header
+// was included (around line 49-59), so the panel will use the correct context.
+
+require_once '../includes/footer.php';
+?>
 

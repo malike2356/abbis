@@ -44,7 +44,7 @@ $totalPages = ceil($totalPosts / $perPage);
     <style>
         /* Enhanced Blog Styling - Beautiful WordPress-like design */
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f8fafc; }
         .cms-content {
             background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
             padding: 4rem 0;
@@ -55,6 +55,7 @@ $totalPages = ceil($totalPosts / $perPage);
             color: white;
             padding: 5rem 2rem;
             text-align: center;
+            margin-top: 20px; /* Additional spacing - body already has padding-top: 80px */
             margin-bottom: 3rem;
         }
         .blog-hero h1 {
@@ -86,6 +87,21 @@ $totalPages = ceil($totalPosts / $perPage);
         .post-card:hover {
             transform: translateY(-8px);
             box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+        }
+        .post-card-image {
+            width: 100%;
+            height: 220px;
+            overflow: hidden;
+            background: #e2e8f0;
+        }
+        .post-card-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s;
+        }
+        .post-card:hover .post-card-image img {
+            transform: scale(1.05);
         }
         .post-card-content {
             padding: 2rem;
@@ -185,6 +201,15 @@ $totalPages = ceil($totalPosts / $perPage);
             <div class="posts-grid">
                 <?php foreach ($posts as $post): ?>
                     <div class="post-card">
+                        <?php if (!empty($post['featured_image'])): ?>
+                            <div class="post-card-image">
+                                <a href="<?php echo $baseUrl; ?>/cms/post/<?php echo urlencode($post['slug']); ?>">
+                                    <img src="<?php echo htmlspecialchars($baseUrl . '/' . $post['featured_image']); ?>" 
+                                         alt="<?php echo htmlspecialchars($post['title']); ?>"
+                                         onerror="this.style.display='none'">
+                                </a>
+                            </div>
+                        <?php endif; ?>
                         <div class="post-card-content">
                             <h2><a href="<?php echo $baseUrl; ?>/cms/post/<?php echo urlencode($post['slug']); ?>"><?php echo htmlspecialchars($post['title']); ?></a></h2>
                             <div class="post-meta">

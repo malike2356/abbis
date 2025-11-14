@@ -9,6 +9,7 @@ require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/helpers.php';
+require_once __DIR__ . '/../includes/crypto.php';
 
 $auth->requireAuth();
 $auth->requireRole(ROLE_ADMIN);
@@ -34,14 +35,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Auto-generate redirect URI if not provided
                 if (empty($redirectUri)) {
-                    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-                    $host = $_SERVER['HTTP_HOST'];
-                    $baseUrl = '/abbis3.2';
-                    if (defined('APP_URL')) {
-                        $parsed = parse_url(APP_URL);
-                        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                    }
-                    $redirectUri = "{$protocol}://{$host}{$baseUrl}/api/social-auth.php?action=google_auth";
+                    $redirectUri = app_url('api/social-auth.php?action=google_auth');
+                }
+
+                $existingSecret = configHasValue($pdo, 'google_client_secret');
+                if ($clientSecret === '' && !$existingSecret) {
+                    throw new RuntimeException('Google Client Secret is required.');
                 }
                 
                 // Save to system_config
@@ -52,7 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 
                 $stmt->execute(['google_client_id', $clientId, 'Google OAuth Client ID', $clientId, 'Google OAuth Client ID']);
-                $stmt->execute(['google_client_secret', $clientSecret, 'Google OAuth Client Secret', $clientSecret, 'Google OAuth Client Secret']);
+                if ($clientSecret !== '') {
+                    $encryptedSecret = Crypto::encrypt($clientSecret);
+                    $stmt->execute(['google_client_secret', $encryptedSecret, 'Google OAuth Client Secret', $encryptedSecret, 'Google OAuth Client Secret']);
+                }
                 $stmt->execute(['google_redirect_uri', $redirectUri, 'Google OAuth Redirect URI', $redirectUri, 'Google OAuth Redirect URI']);
                 
                 $message = 'Google OAuth configuration saved successfully!';
@@ -64,14 +66,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Auto-generate redirect URI if not provided
                 if (empty($redirectUri)) {
-                    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-                    $host = $_SERVER['HTTP_HOST'];
-                    $baseUrl = '/abbis3.2';
-                    if (defined('APP_URL')) {
-                        $parsed = parse_url(APP_URL);
-                        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                    }
-                    $redirectUri = "{$protocol}://{$host}{$baseUrl}/api/social-auth.php?action=facebook_auth";
+                    $redirectUri = app_url('api/social-auth.php?action=facebook_auth');
+                }
+
+                $existingSecret = configHasValue($pdo, 'facebook_app_secret');
+                if ($appSecret === '' && !$existingSecret) {
+                    throw new RuntimeException('Facebook App Secret is required.');
                 }
                 
                 // Save to system_config
@@ -82,7 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 
                 $stmt->execute(['facebook_app_id', $appId, 'Facebook App ID', $appId, 'Facebook App ID']);
-                $stmt->execute(['facebook_app_secret', $appSecret, 'Facebook App Secret', $appSecret, 'Facebook App Secret']);
+                if ($appSecret !== '') {
+                    $encryptedSecret = Crypto::encrypt($appSecret);
+                    $stmt->execute(['facebook_app_secret', $encryptedSecret, 'Facebook App Secret', $encryptedSecret, 'Facebook App Secret']);
+                }
                 $stmt->execute(['facebook_redirect_uri', $redirectUri, 'Facebook OAuth Redirect URI', $redirectUri, 'Facebook OAuth Redirect URI']);
                 
                 $message = 'Facebook OAuth configuration saved successfully!';
@@ -90,6 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
         } catch (PDOException $e) {
             $message = 'Error saving configuration: ' . $e->getMessage();
+            $messageType = 'error';
+        } catch (RuntimeException $e) {
+            $message = $e->getMessage();
             $messageType = 'error';
         }
     }
@@ -101,41 +107,52 @@ function getConfigValue($pdo, $key, $default = '') {
         $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key = ?");
         $stmt->execute([$key]);
         $result = $stmt->fetch();
-        return $result ? $result['config_value'] : $default;
+        if (!$result) {
+            return $default;
+        }
+
+        $value = $result['config_value'];
+        if (Crypto::isEncrypted($value)) {
+            try {
+                $value = Crypto::decrypt($value);
+            } catch (RuntimeException $e) {
+                error_log('Config decrypt failed for key ' . $key . ': ' . $e->getMessage());
+                return $default;
+            }
+        }
+
+        return $value !== '' ? $value : $default;
     } catch (PDOException $e) {
         return $default;
     }
 }
 
+function configHasValue($pdo, $key): bool {
+    try {
+        $stmt = $pdo->prepare("SELECT config_value FROM system_config WHERE config_key = ? LIMIT 1");
+        $stmt->execute([$key]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result && !empty($result['config_value']);
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
 $googleClientId = getConfigValue($pdo, 'google_client_id');
-$googleClientSecret = getConfigValue($pdo, 'google_client_secret');
+$googleClientSecretStored = configHasValue($pdo, 'google_client_secret');
 $googleRedirectUri = getConfigValue($pdo, 'google_redirect_uri', '');
 
 $facebookAppId = getConfigValue($pdo, 'facebook_app_id');
-$facebookAppSecret = getConfigValue($pdo, 'facebook_app_secret');
+$facebookAppSecretStored = configHasValue($pdo, 'facebook_app_secret');
 $facebookRedirectUri = getConfigValue($pdo, 'facebook_redirect_uri', '');
 
 // Auto-generate redirect URIs if not set
 if (empty($googleRedirectUri)) {
-    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'];
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
-    $googleRedirectUri = "{$protocol}://{$host}{$baseUrl}/api/social-auth.php?action=google_auth";
+    $googleRedirectUri = app_url('api/social-auth.php?action=google_auth');
 }
 
 if (empty($facebookRedirectUri)) {
-    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'];
-    $baseUrl = '/abbis3.2';
-    if (defined('APP_URL')) {
-        $parsed = parse_url(APP_URL);
-        $baseUrl = $parsed['path'] ?? '/abbis3.2';
-    }
-    $facebookRedirectUri = "{$protocol}://{$host}{$baseUrl}/api/social-auth.php?action=facebook_auth";
+    $facebookRedirectUri = app_url('api/social-auth.php?action=facebook_auth');
 }
 
 require_once __DIR__ . '/../includes/header.php';
@@ -208,10 +225,13 @@ require_once __DIR__ . '/../includes/header.php';
                                 id="google_client_secret" 
                                 name="google_client_secret" 
                                 class="form-control" 
-                                value="<?php echo htmlspecialchars($googleClientSecret); ?>" 
-                                placeholder="GOCSPX-xxxxxxxxxxxxx"
-                                required>
-                            <small class="form-text text-muted">Get this from Google Cloud Console → Credentials</small>
+                                value="" 
+                                placeholder="Enter new secret to update">
+                            <?php if ($googleClientSecretStored): ?>
+                                <small class="form-text text-muted">A secret is already stored securely. Leave blank to keep the existing secret.</small>
+                            <?php else: ?>
+                                <small class="form-text text-muted">Get this from Google Cloud Console → Credentials</small>
+                            <?php endif; ?>
                         </div>
 
                         <div class="form-group">
@@ -288,10 +308,13 @@ require_once __DIR__ . '/../includes/header.php';
                                 id="facebook_app_secret" 
                                 name="facebook_app_secret" 
                                 class="form-control" 
-                                value="<?php echo htmlspecialchars($facebookAppSecret); ?>" 
-                                placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                                required>
-                            <small class="form-text text-muted">Get this from Facebook Developers → App Settings</small>
+                                value="" 
+                                placeholder="Enter new secret to update">
+                            <?php if ($facebookAppSecretStored): ?>
+                                <small class="form-text text-muted">A secret is already stored securely. Leave blank to keep the existing secret.</small>
+                            <?php else: ?>
+                                <small class="form-text text-muted">Get this from Facebook Developers → App Settings</small>
+                            <?php endif; ?>
                         </div>
 
                         <div class="form-group">

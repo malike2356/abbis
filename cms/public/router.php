@@ -18,9 +18,12 @@ catch (Throwable $e) {
     @run_sql_file(__DIR__ . '/../../database/cms_migration.sql');
 }
 
-$path = trim($_SERVER['REQUEST_URI'] ?? '', '/');
-$path = str_replace('/cms/', '', $path);
-$path = str_replace('/abbis3.2/cms/', '', $path);
+$requestUri = $_SERVER['REQUEST_URI'] ?? '';
+$requestUri = strtok($requestUri, '?');
+$basePath = app_base_path();
+$cmsPrefix = ($basePath ?: '') . '/cms/';
+$path = preg_replace('#^' . preg_quote($cmsPrefix, '#') . '#', '', $requestUri);
+$path = trim($path, '/');
 $segments = explode('/', $path);
 
 $page = $segments[0] ?? 'home';
@@ -33,6 +36,17 @@ switch ($page) {
         break;
     case 'quote':
         include __DIR__ . '/quote.php';
+        break;
+    case 'rig-request':
+        include __DIR__ . '/rig-request.php';
+        break;
+    case 'contact':
+    case 'contact-us':
+        include __DIR__ . '/contact.php';
+        break;
+    case 'complaints':
+    case 'feedback':
+        include __DIR__ . '/complaints.php';
         break;
     case 'cart':
     case 'checkout':
@@ -47,6 +61,14 @@ switch ($page) {
         break;
     case 'post':
         include __DIR__ . '/post.php';
+        break;
+    case 'portfolio':
+        // Handle portfolio items with slugs: /portfolio/slug
+        if ($slug) {
+            // Decode URL-encoded slug and pass as GET parameter to portfolio.php
+            $_GET['slug'] = urldecode($slug);
+        }
+        include __DIR__ . '/portfolio.php';
         break;
     case 'legal':
         // Legal documents route
@@ -67,12 +89,8 @@ switch ($page) {
                 header('HTTP/1.0 404 Not Found');
                 echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Document Not Found</title></head><body>';
                 echo '<h1>Document Not Found</h1>';
-                $baseUrl = '/abbis3.2';
-                if (defined('APP_URL')) {
-                    $parsed = parse_url(APP_URL);
-                    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-                }
-                echo '<p><a href="' . $baseUrl . '/">← Back to Home</a></p>';
+                $homeHref = rtrim(app_path(), '/') . '/';
+                echo '<p><a href="' . $homeHref . '">← Back to Home</a></p>';
                 echo '</body></html>';
                 exit;
             }
@@ -94,7 +112,7 @@ switch ($page) {
             include __DIR__ . '/page.php';
         } else {
             // 404 or fallback to homepage
-            header('Location: /');
+            header('Location: ' . rtrim(app_path(), '/') . '/');
             exit;
         }
 }

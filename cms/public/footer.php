@@ -109,7 +109,7 @@ if (!defined('CMS_FOOTER_LOADED')) {
                 <div class="cms-footer-widget">
                     <h3 class="cms-footer-widget-title">Contact</h3>
                     <p class="cms-footer-widget-text">
-                        <a href="<?php echo $baseUrl; ?>/cms/quote" style="color: <?php echo htmlspecialchars($primaryColor); ?>;">Get a Quote</a>
+                    <a href="<?php echo $baseUrl; ?>/cms/quote" class="cms-footer-link">Estimates</a>
                     </p>
                 </div>
             <?php endif; ?>
@@ -128,7 +128,7 @@ if (!defined('CMS_FOOTER_LOADED')) {
 .cms-footer {
     background: <?php echo htmlspecialchars($footerBg); ?> !important;
     color: <?php echo htmlspecialchars($footerTextColor); ?> !important;
-    margin-top: 4rem;
+    margin-top: 0;
     padding: 0;
 }
 
@@ -187,13 +187,15 @@ if (!defined('CMS_FOOTER_LOADED')) {
 }
 
 .widget-content a {
-    color: rgba(255,255,255,0.8) !important;
+    color: #60a5fa !important; /* Light blue for better contrast on dark background */
     text-decoration: none;
-    transition: color 0.2s;
+    transition: all 0.2s;
+    border-bottom: 1px solid transparent;
 }
 
 .widget-content a:hover {
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
+    color: #93c5fd !important; /* Lighter blue on hover */
+    border-bottom-color: #93c5fd;
 }
 
 .widget-content form {
@@ -232,18 +234,38 @@ if (!defined('CMS_FOOTER_LOADED')) {
     margin: 0;
 }
 
+.cms-footer-menu li {
+    margin-bottom: 0.75rem;
+}
+
+.cms-footer-menu a {
+    color: #60a5fa !important; /* Light blue for better contrast on dark background */
+    text-decoration: none;
+    transition: all 0.2s;
+    display: inline-block;
+    border-bottom: 1px solid transparent;
+}
+
+.cms-footer-menu a:hover {
+    color: #93c5fd !important; /* Lighter blue on hover */
+    border-bottom-color: #93c5fd;
+}
+
 .cms-footer-menu-item {
     margin-bottom: 0.5rem;
 }
 
 .cms-footer-link {
-    color: rgba(255,255,255,0.8) !important;
+    color: #60a5fa !important; /* Light blue for better contrast on dark background */
     text-decoration: none;
-    transition: color 0.2s;
+    transition: all 0.2s;
+    display: inline-block;
+    border-bottom: 1px solid transparent;
 }
 
 .cms-footer-link:hover {
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
+    color: #93c5fd !important; /* Lighter blue on hover */
+    border-bottom-color: #93c5fd;
 }
 
 .cms-footer-submenu {

@@ -384,13 +384,22 @@ unset($u); // Unset reference
 $roles = ['admin' => 'Administrator', 'editor' => 'Editor', 'author' => 'Author', 'contributor' => 'Contributor', 'subscriber' => 'Subscriber'];
 $statuses = ['active' => 'Active', 'inactive' => 'Inactive', 'pending' => 'Pending', 'suspended' => 'Suspended'];
 
+// Calculate statistics
+$statsQuery = $pdo->query("SELECT 
+    COUNT(*) as total,
+    SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active,
+    SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) as inactive,
+    SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
+    SUM(CASE WHEN status='suspended' THEN 1 ELSE 0 END) as suspended,
+    SUM(CASE WHEN role='admin' THEN 1 ELSE 0 END) as admins,
+    SUM(CASE WHEN role='editor' THEN 1 ELSE 0 END) as editors,
+    SUM(CASE WHEN last_login IS NOT NULL AND last_login >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) as active_last_month
+    FROM cms_users");
+$stats = $statsQuery->fetch(PDO::FETCH_ASSOC);
+
 $configStmt = $pdo->query("SELECT config_value FROM system_config WHERE config_key='company_name'");
 $companyName = $configStmt->fetchColumn() ?: 'CMS Admin';
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
+$baseUrl = app_url();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -406,32 +415,624 @@ if (defined('APP_URL')) {
     include 'header.php'; 
     ?>
     <style>
-        .user-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 8px; }
-        .user-status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+        .users-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: white;
+            border: 1px solid #c3c4c7;
+            border-left: 4px solid #2271b1;
+            padding: 20px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .stat-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .stat-card.active { border-left-color: #00a32a; }
+        .stat-card.inactive { border-left-color: #dcdcde; }
+        .stat-card.pending { border-left-color: #f59e0b; }
+        .stat-card.suspended { border-left-color: #dc3232; }
+        .stat-card.admins { border-left-color: #9333ea; }
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1d2327;
+            margin: 10px 0 5px 0;
+        }
+        .stat-label {
+            color: #646970;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .users-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .users-search-filters {
+            background: white;
+            border: 1px solid #c3c4c7;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .search-filters-row {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .search-filters-row > div {
+            flex: 1;
+            min-width: 200px;
+        }
+        .search-filters-row label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #1d2327;
+            font-size: 13px;
+        }
+        .search-filters-row input,
+        .search-filters-row select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #8c8f94;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .search-filters-row input:focus,
+        .search-filters-row select:focus {
+            outline: none;
+            border-color: #2271b1;
+            box-shadow: 0 0 0 1px #2271b1;
+        }
+        .view-toggle {
+            display: flex;
+            gap: 5px;
+            background: #f6f7f7;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .view-toggle button {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .view-toggle button.active {
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .user-avatar { 
+            width: 48px; 
+            height: 48px; 
+            border-radius: 50%; 
+            object-fit: cover; 
+            vertical-align: middle; 
+            margin-right: 12px;
+            border: 2px solid #e5e7eb;
+        }
+        .user-avatar-placeholder {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2271b1 0%, #135e96 100%);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 18px;
+            margin-right: 12px;
+            vertical-align: middle;
+        }
+        .user-status { 
+            display: inline-block; 
+            padding: 4px 12px; 
+            border-radius: 12px; 
+            font-size: 11px; 
+            font-weight: 600; 
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
         .user-status-active { background: #d1fae5; color: #065f46; }
         .user-status-inactive { background: #fee2e2; color: #991b1b; }
         .user-status-pending { background: #fef3c7; color: #92400e; }
         .user-status-suspended { background: #e5e7eb; color: #374151; }
-        .user-actions { display: flex; gap: 5px; }
-        .user-actions a, .user-actions button { padding: 4px 8px; font-size: 12px; }
-        .search-box { margin-bottom: 20px; }
-        .filters { display: flex; gap: 15px; margin-bottom: 20px; align-items: flex-end; }
-        .filters select, .filters input { padding: 6px 10px; }
-        .bulk-actions { margin-bottom: 20px; padding: 10px; background: #f6f7f7; border: 1px solid #c3c4c7; display: none; }
-        .bulk-actions.active { display: block; }
+        .user-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .user-actions a, .user-actions button { 
+            padding: 6px 12px; 
+            font-size: 12px; 
+            border-radius: 4px;
+            text-decoration: none;
+        }
+        .bulk-actions { 
+            margin-bottom: 20px; 
+            padding: 15px; 
+            background: #f0f9ff; 
+            border: 1px solid #2271b1; 
+            border-radius: 8px;
+            display: none; 
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .bulk-actions.active { display: flex; }
+        .bulk-actions select {
+            padding: 8px 12px;
+            border: 1px solid #8c8f94;
+            border-radius: 4px;
+        }
         .user-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .user-form-avatar { text-align: center; }
         .user-form-avatar img { width: 150px; height: 150px; border-radius: 50%; object-fit: cover; border: 3px solid #c3c4c7; }
-        .pagination { margin-top: 20px; display: flex; gap: 5px; }
-        .pagination a, .pagination span { padding: 5px 10px; border: 1px solid #c3c4c7; text-decoration: none; }
-        .pagination .current { background: #2271b1; color: white; border-color: #2271b1; }
+        .pagination { 
+            margin-top: 20px; 
+            display: flex; 
+            gap: 5px; 
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .pagination a, .pagination span { 
+            padding: 8px 12px; 
+            border: 1px solid #c3c4c7; 
+            text-decoration: none; 
+            border-radius: 4px;
+            color: #2271b1;
+        }
+        .pagination .current { 
+            background: #2271b1; 
+            color: white; 
+            border-color: #2271b1; 
+        }
+        .users-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 24px;
+            margin-top: 20px;
+        }
+        .user-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 24px;
+            transition: all 0.3s;
+            position: relative;
+            box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+        }
+        .user-card:hover {
+            box-shadow: 0 24px 44px rgba(37, 99, 235, 0.15);
+            transform: translateY(-6px);
+            border-color: #2563eb;
+        }
+        .user-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 18px;
+            gap: 16px;
+        }
+        .user-card-avatar {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid rgba(37, 99, 235, 0.25);
+            box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+        }
+        .user-card-avatar-placeholder {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 26px;
+            flex-shrink: 0;
+            box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+        }
+        .user-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .user-card-name {
+            font-size: 17px;
+            font-weight: 600;
+            color: #0f172a;
+            margin: 0 0 6px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .user-card-username {
+            font-size: 13px;
+            color: #64748b;
+            margin: 0;
+        }
+        .user-card-meta {
+            display: grid;
+            gap: 14px;
+            margin: 18px 0;
+            padding: 16px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(14, 116, 144, 0.03) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        }
+        .user-card-meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .user-card-meta-label {
+            font-size: 11px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.65px;
+        }
+        .user-card-meta-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .user-card-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #646970;
+        }
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+        .user-edit-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .user-edit-hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: stretch;
+            flex-wrap: wrap;
+            gap: 24px;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 40%, #0f172a 100%);
+            border-radius: 20px;
+            padding: 28px;
+            color: #e2e8f0;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+            position: relative;
+            overflow: hidden;
+        }
+        .user-edit-hero::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.18), transparent 50%),
+                        radial-gradient(circle at bottom left, rgba(59, 130, 246, 0.28), transparent 55%);
+            pointer-events: none;
+        }
+        .user-hero-primary {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1 1 320px;
+        }
+        .user-hero-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .user-hero-pill {
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(6px);
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #e2e8f0;
+        }
+        .user-hero-pill.role {
+            background: rgba(124, 58, 237, 0.35);
+        }
+        .user-hero-pill.status-active {
+            background: rgba(34, 197, 94, 0.35);
+        }
+        .user-hero-pill.status-inactive,
+        .user-hero-pill.status-suspended {
+            background: rgba(239, 68, 68, 0.35);
+        }
+        .user-hero-title {
+            font-size: 32px;
+            font-weight: 700;
+            margin: 0;
+            color: #fff;
+        }
+        .user-hero-subtitle {
+            margin: 0;
+            font-size: 14px;
+            color: rgba(226, 232, 240, 0.85);
+        }
+        .user-hero-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 10px;
+            color: rgba(226, 232, 240, 0.75);
+            font-size: 13px;
+        }
+        .user-hero-avatar {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
+        .user-hero-avatar figure {
+            width: 140px;
+            height: 140px;
+            border-radius: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.55);
+            box-shadow: 0 18px 34px rgba(15, 23, 42, 0.25);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.4);
+            font-size: 52px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .user-hero-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar-upload-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #f8fafc;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .avatar-upload-trigger:hover {
+            background: rgba(255, 255, 255, 0.22);
+        }
+        .user-edit-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+            gap: 24px;
+        }
+        .user-edit-main {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .user-edit-section {
+            background: #ffffff;
+            border-radius: 18px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+            padding: 22px 24px;
+        }
+        .user-edit-section header {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+        .user-edit-section h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #0f172a;
+        }
+        .user-edit-section p {
+            margin: 0;
+            font-size: 13px;
+            color: #64748b;
+        }
+        .user-field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+        }
+        .user-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .user-field label {
+            font-weight: 600;
+            font-size: 13px;
+            color: #0f172a;
+        }
+        .user-field input,
+        .user-field select,
+        .user-field textarea {
+            border: 1px solid #cbd5f5;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 14px;
+            color: #1e293b;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            background: #fff;
+        }
+        .user-field textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        .user-field input:focus,
+        .user-field select:focus,
+        .user-field textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+        .user-field .description {
+            font-size: 12px;
+            color: #64748b;
+        }
+        .user-field.full {
+            grid-column: 1 / -1;
+        }
+        .user-edit-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .user-side-card {
+            background: #ffffff;
+            border-radius: 18px;
+            border: 1px solid #e2e8f0;
+            padding: 20px 22px;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+        }
+        .user-side-card h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            color: #0f172a;
+        }
+        .user-side-summary {
+            display: grid;
+            gap: 10px;
+        }
+        .user-side-summary span {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #475569;
+        }
+        .user-side-summary strong {
+            color: #0f172a;
+        }
+        .user-side-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: none;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .user-side-btn.primary {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            color: #fff;
+        }
+        .user-side-btn.danger {
+            background: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
+            color: #fff;
+        }
+        .user-side-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.18);
+        }
+        .user-edit-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 16px 20px;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+        }
+        .user-edit-actions .left {
+            font-size: 13px;
+            color: #64748b;
+        }
+        .user-edit-actions .right {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .user-edit-save {
+            padding: 10px 20px;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 12px 22px rgba(37, 99, 235, 0.25);
+        }
+        .user-edit-cancel {
+            padding: 10px 16px;
+            border-radius: 12px;
+            border: 1px solid #cbd5f5;
+            background: #fff;
+            color: #1d4ed8;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        @media (max-width: 1024px) {
+            .user-edit-grid {
+                grid-template-columns: 1fr;
+            }
+            .user-edit-sidebar {
+                flex-direction: row;
+                flex-wrap: wrap;
+            }
+            .user-side-card {
+                flex: 1 1 280px;
+            }
+        }
+        @media (max-width: 768px) {
+            .user-edit-hero {
+                padding: 20px;
+            }
+            .user-hero-title {
+                font-size: 26px;
+            }
+            .user-edit-section {
+                padding: 18px;
+            }
+        }
     </style>
 </head>
 <body>
     <?php include 'footer.php'; ?>
     
     <div class="wrap">
-        <h1><?php echo $action === 'edit' ? 'Edit User' : ($action === 'add' ? 'Add New User' : 'Users'); ?></h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h1 style="margin: 0;"><?php echo $action === 'edit' ? '✏️ Edit User' : ($action === 'add' ? '➕ Add New User' : '👥 Users'); ?></h1>
+        </div>
         
         <?php if ($message): ?>
             <div class="notice notice-success"><p><?php echo htmlspecialchars($message); ?></p></div>
@@ -441,172 +1042,289 @@ if (defined('APP_URL')) {
         <?php endif; ?>
         
         <?php if ($action === 'edit' || $action === 'add'): ?>
-            <form method="post" enctype="multipart/form-data" class="post-form">
+            <?php
+                $isEditing = $action === 'edit';
+                $roleKey = $user['role'] ?? 'subscriber';
+                $statusKey = $user['status'] ?? 'active';
+                $roleLabel = $roles[$roleKey] ?? ucfirst($roleKey);
+                $statusLabel = $statuses[$statusKey] ?? ucfirst($statusKey);
+                $userDisplayName = $user['display_name'] ?? ($user['username'] ?? 'New User');
+                $userEmail = $user['email'] ?? '';
+                $userInitial = strtoupper(substr($userDisplayName, 0, 1));
+                $lastLogin = $user['last_login'] ?? null;
+                $loginCount = (int) ($user['login_count'] ?? 0);
+                $registeredAt = $user['created_at'] ?? null;
+            ?>
+            <form method="post" enctype="multipart/form-data" class="user-edit-form">
                 <input type="hidden" name="user_id" value="<?php echo $user['id'] ?? ''; ?>">
-                
-                <div class="user-form-grid">
-                    <div>
-                        <div class="form-group">
-                            <label>Username <span style="color: red;">*</span></label>
-                            <input type="text" name="username" value="<?php echo htmlspecialchars($user['username'] ?? ''); ?>" required class="regular-text">
+
+                <div class="user-edit-shell">
+                    <section class="user-edit-hero">
+                        <div class="user-hero-primary">
+                            <div class="user-hero-meta">
+                                <span class="user-hero-pill role"><?php echo htmlspecialchars($roleLabel); ?></span>
+                                <span class="user-hero-pill status-<?php echo htmlspecialchars($statusKey); ?>"><?php echo htmlspecialchars($statusLabel); ?></span>
+                                <?php if ($isEditing): ?>
+                                    <span class="user-hero-pill">User ID #<?php echo (int) $user['id']; ?></span>
+                                <?php endif; ?>
+                            </div>
+                            <h2 class="user-hero-title"><?php echo htmlspecialchars($userDisplayName); ?></h2>
+                            <p class="user-hero-subtitle"><?php echo $userEmail ? htmlspecialchars($userEmail) : 'Email will be required to notify this user.'; ?></p>
+                            <div class="user-hero-inline">
+                                <span>Username: <strong><?php echo htmlspecialchars($user['username'] ?? 'pending'); ?></strong></span>
+                                <?php if ($isEditing && $lastLogin): ?>
+                                    <span>Last Login: <strong><?php echo date('M j, Y H:i', strtotime($lastLogin)); ?></strong></span>
+                                <?php endif; ?>
+                                <?php if ($isEditing): ?>
+                                    <span>Logins: <strong><?php echo $loginCount; ?></strong></span>
+                                <?php endif; ?>
+                            </div>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>Email <span style="color: red;">*</span></label>
-                            <input type="email" name="email" value="<?php echo htmlspecialchars($user['email'] ?? ''); ?>" required class="regular-text">
+                        <div class="user-hero-avatar">
+                            <figure>
+                                <?php if (!empty($user['avatar'])): ?>
+                                    <img src="<?php echo $baseUrl . '/' . htmlspecialchars($user['avatar']); ?>" alt="Profile picture" id="avatar-preview">
+                                <?php else: ?>
+                                    <img src="" alt="Profile picture" id="avatar-preview" style="display:none;">
+                                    <span id="avatar-placeholder"><?php echo htmlspecialchars($userInitial); ?></span>
+                                <?php endif; ?>
+                            </figure>
+                            <label class="avatar-upload-trigger" for="avatar-input">
+                                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                                <span><?php echo $isEditing ? 'Change picture' : 'Upload picture'; ?></span>
+                            </label>
+                            <input type="file" name="avatar" id="avatar-input" accept="image/*" onchange="previewAvatar(this)" style="display:none;">
+                            <small style="font-size:11px; color: rgba(226,232,240,0.75);">JPG, PNG, GIF &mdash; max 2MB</small>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>First Name</label>
-                            <input type="text" name="first_name" value="<?php echo htmlspecialchars($user['first_name'] ?? ''); ?>" class="regular-text">
+                    </section>
+
+                    <div class="user-edit-grid">
+                        <div class="user-edit-main">
+                            <section class="user-edit-section">
+                                <header>
+                                    <h2>Account Access</h2>
+                                    <p>Credentials and permissions required to sign in.</p>
+                                </header>
+                                <div class="user-field-grid">
+                                    <div class="user-field">
+                                        <label>Username <span style="color:#dc2626;">*</span></label>
+                                        <input type="text" name="username" value="<?php echo htmlspecialchars($user['username'] ?? ''); ?>" required>
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Email <span style="color:#dc2626;">*</span></label>
+                                        <input type="email" name="email" value="<?php echo htmlspecialchars($user['email'] ?? ''); ?>" required>
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Role <span style="color:#dc2626;">*</span></label>
+                                        <select name="role" required>
+                                            <?php foreach ($roles as $roleValue => $roleName): ?>
+                                                <option value="<?php echo $roleValue; ?>" <?php echo $roleKey === $roleValue ? 'selected' : ''; ?>><?php echo htmlspecialchars($roleName); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Status <span style="color:#dc2626;">*</span></label>
+                                        <select name="status" required>
+                                            <?php foreach ($statuses as $statusValue => $statusName): ?>
+                                                <option value="<?php echo $statusValue; ?>" <?php echo $statusKey === $statusValue ? 'selected' : ''; ?>><?php echo htmlspecialchars($statusName); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="user-field full">
+                                        <label><?php echo $isEditing ? 'New password' : 'Password'; ?><?php echo $isEditing ? '' : ' <span style="color:#dc2626;">*</span>'; ?></label>
+                                        <input type="password" name="new_password" <?php echo $isEditing ? '' : 'required'; ?> placeholder="<?php echo $isEditing ? 'Leave blank to keep current password' : 'Minimum 8 characters'; ?>">
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="user-edit-section">
+                                <header>
+                                    <h2>Profile Details</h2>
+                                    <p>Personal information displayed across internal tools.</p>
+                                </header>
+                                <div class="user-field-grid">
+                                    <div class="user-field">
+                                        <label>First name</label>
+                                        <input type="text" name="first_name" value="<?php echo htmlspecialchars($user['first_name'] ?? ''); ?>">
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Last name</label>
+                                        <input type="text" name="last_name" value="<?php echo htmlspecialchars($user['last_name'] ?? ''); ?>">
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Display name</label>
+                                        <input type="text" name="display_name" value="<?php echo htmlspecialchars($user['display_name'] ?? ($user['username'] ?? '')); ?>">
+                                        <span class="description">Shown on public-facing areas.</span>
+                                    </div>
+                                    <div class="user-field full">
+                                        <label>Biographical info</label>
+                                        <textarea name="bio" rows="4" placeholder="Share a short bio or responsibilities."><?php echo htmlspecialchars($user['bio'] ?? ''); ?></textarea>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="user-edit-section">
+                                <header>
+                                    <h2>Contact & Preferences</h2>
+                                    <p>How we reach the user and their localisation settings.</p>
+                                </header>
+                                <div class="user-field-grid">
+                                    <div class="user-field">
+                                        <label>Phone</label>
+                                        <input type="tel" name="phone" value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>">
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Website</label>
+                                        <input type="url" name="website" value="<?php echo htmlspecialchars($user['website'] ?? ''); ?>" placeholder="https://">
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Location</label>
+                                        <input type="text" name="location" value="<?php echo htmlspecialchars($user['location'] ?? ''); ?>">
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Timezone</label>
+                                        <select name="timezone">
+                                            <?php $timezone = $user['timezone'] ?? 'UTC'; ?>
+                                            <option value="UTC" <?php echo $timezone === 'UTC' ? 'selected' : ''; ?>>UTC</option>
+                                            <option value="Africa/Accra" <?php echo $timezone === 'Africa/Accra' ? 'selected' : ''; ?>>Africa/Accra</option>
+                                            <option value="America/New_York" <?php echo $timezone === 'America/New_York' ? 'selected' : ''; ?>>America/New_York</option>
+                                            <option value="Europe/London" <?php echo $timezone === 'Europe/London' ? 'selected' : ''; ?>>Europe/London</option>
+                                        </select>
+                                    </div>
+                                    <div class="user-field">
+                                        <label>Language</label>
+                                        <select name="language">
+                                            <?php $language = $user['language'] ?? 'en'; ?>
+                                            <option value="en" <?php echo $language === 'en' ? 'selected' : ''; ?>>English</option>
+                                            <option value="fr" <?php echo $language === 'fr' ? 'selected' : ''; ?>>French</option>
+                                            <option value="es" <?php echo $language === 'es' ? 'selected' : ''; ?>>Spanish</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>Last Name</label>
-                            <input type="text" name="last_name" value="<?php echo htmlspecialchars($user['last_name'] ?? ''); ?>" class="regular-text">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Display Name</label>
-                            <input type="text" name="display_name" value="<?php echo htmlspecialchars($user['display_name'] ?? ($user['username'] ?? '')); ?>" class="regular-text">
-                            <p class="description">The name displayed on the site.</p>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Role <span style="color: red;">*</span></label>
-                            <select name="role" required>
-                                <?php foreach ($roles as $roleValue => $roleName): ?>
-                                    <option value="<?php echo $roleValue; ?>" <?php echo ($user['role'] ?? 'subscriber') === $roleValue ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($roleName); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Status <span style="color: red;">*</span></label>
-                            <select name="status" required>
-                                <?php foreach ($statuses as $statusValue => $statusName): ?>
-                                    <option value="<?php echo $statusValue; ?>" <?php echo ($user['status'] ?? 'active') === $statusValue ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($statusName); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label><?php echo $user ? 'New ' : ''; ?>Password<?php echo $user ? '' : ' <span style="color: red;">*</span>'; ?></label>
-                            <input type="password" name="new_password" class="regular-text" <?php echo $user ? '' : 'required'; ?>>
-                            <p class="description"><?php echo $user ? 'Leave blank to keep current password.' : 'Minimum 8 characters.'; ?></p>
-                        </div>
-                    </div>
-                    
-                    <div>
-                        <div class="user-form-avatar">
-                            <?php if (!empty($user['avatar'])): ?>
-                                <img src="<?php echo $baseUrl . '/' . htmlspecialchars($user['avatar']); ?>" alt="Avatar" id="avatar-preview">
-                            <?php else: ?>
-                                <div style="width: 150px; height: 150px; border-radius: 50%; background: #c3c4c7; display: flex; align-items: center; justify-content: center; color: white; font-size: 48px; margin: 0 auto;">
-                                    <?php echo strtoupper(substr($user['username'] ?? 'U', 0, 1)); ?>
+
+                        <aside class="user-edit-sidebar">
+                            <div class="user-side-card">
+                                <h3>Account Snapshot</h3>
+                                <div class="user-side-summary">
+                                    <span>Role <strong><?php echo htmlspecialchars($roleLabel); ?></strong></span>
+                                    <span>Status <strong><?php echo htmlspecialchars($statusLabel); ?></strong></span>
+                                    <?php if ($isEditing && $registeredAt): ?>
+                                        <span>Created <strong><?php echo date('M j, Y H:i', strtotime($registeredAt)); ?></strong></span>
+                                    <?php endif; ?>
+                                    <?php if ($isEditing): ?>
+                                        <span>Logins <strong><?php echo $loginCount; ?></strong></span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <?php if ($isEditing): ?>
+                                <div class="user-side-card">
+                                    <h3>Quick Actions</h3>
+                                    <button type="submit" name="send_password_reset" value="1" class="user-side-btn primary">
+                                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
+                                        Send password reset
+                                    </button>
+                                    <?php if (($user['id'] ?? null) != ($_SESSION['cms_user_id'] ?? null)): ?>
+                                        <button type="submit" name="delete_user" value="1" class="user-side-btn danger" onclick="return confirm('Delete this user? This action cannot be undone.');">
+                                            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                            Delete user
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                             <?php endif; ?>
-                            <div style="margin-top: 15px;">
-                                <input type="file" name="avatar" accept="image/*" onchange="previewAvatar(this)">
-                                <p class="description">Upload a profile picture (JPG, PNG, GIF, max 2MB)</p>
-                            </div>
+                        </aside>
+                    </div>
+
+                    <div class="user-edit-actions">
+                        <div class="left">
+                            <?php echo $isEditing ? 'Last updated automatically when you save.' : 'All fields marked * are required to create the account.'; ?>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>Biographical Info</label>
-                            <textarea name="bio" rows="5" class="large-text"><?php echo htmlspecialchars($user['bio'] ?? ''); ?></textarea>
-                            <p class="description">Share a little biographical information to fill out your profile.</p>
+                        <div class="right">
+                            <a href="users.php" class="user-edit-cancel">Cancel</a>
+                            <button type="submit" name="save_user" class="user-edit-save">Save changes</button>
                         </div>
-                        
-                        <div class="form-group">
-                            <label>Phone</label>
-                            <input type="tel" name="phone" value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>" class="regular-text">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Website</label>
-                            <input type="url" name="website" value="<?php echo htmlspecialchars($user['website'] ?? ''); ?>" class="regular-text" placeholder="https://">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Location</label>
-                            <input type="text" name="location" value="<?php echo htmlspecialchars($user['location'] ?? ''); ?>" class="regular-text">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Timezone</label>
-                            <select name="timezone" class="regular-text">
-                                <option value="UTC" <?php echo ($user['timezone'] ?? 'UTC') === 'UTC' ? 'selected' : ''; ?>>UTC</option>
-                                <option value="Africa/Accra" <?php echo ($user['timezone'] ?? '') === 'Africa/Accra' ? 'selected' : ''; ?>>Africa/Accra</option>
-                                <option value="America/New_York" <?php echo ($user['timezone'] ?? '') === 'America/New_York' ? 'selected' : ''; ?>>America/New_York</option>
-                                <option value="Europe/London" <?php echo ($user['timezone'] ?? '') === 'Europe/London' ? 'selected' : ''; ?>>Europe/London</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Language</label>
-                            <select name="language">
-                                <option value="en" <?php echo ($user['language'] ?? 'en') === 'en' ? 'selected' : ''; ?>>English</option>
-                                <option value="fr" <?php echo ($user['language'] ?? '') === 'fr' ? 'selected' : ''; ?>>French</option>
-                                <option value="es" <?php echo ($user['language'] ?? '') === 'es' ? 'selected' : ''; ?>>Spanish</option>
-                            </select>
-                        </div>
-                        
-                        <?php if ($user): ?>
-                            <div class="form-group">
-                                <p><strong>Last Login:</strong> <?php echo !empty($user['last_login']) ? date('Y-m-d H:i:s', strtotime($user['last_login'])) : 'Never'; ?></p>
-                                <p><strong>Login Count:</strong> <?php echo $user['login_count'] ?? 0; ?></p>
-                                <p><strong>Registered:</strong> <?php echo date('Y-m-d H:i:s', strtotime($user['created_at'])); ?></p>
-                            </div>
-                        <?php endif; ?>
                     </div>
                 </div>
-                
-                <p class="submit">
-                    <input type="submit" name="save_user" class="button button-primary" value="Save User">
-                    <a href="users.php" class="button">Cancel</a>
-                </p>
             </form>
         <?php else: ?>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <a href="?action=add" class="page-title-action">Add New</a>
-                
-                <form method="get" class="search-box" style="display: inline-block;">
-                    <input type="search" name="s" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search users..." class="regular-text">
-                    <input type="submit" value="Search Users" class="button">
-                    <?php if ($search || $roleFilter || $statusFilter): ?>
-                        <a href="users.php" class="button">Clear</a>
-                    <?php endif; ?>
-                </form>
+            <!-- Statistics Cards -->
+            <div class="users-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Total Users</div>
+                    <div class="stat-value"><?php echo $stats['total'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card active">
+                    <div class="stat-label">Active</div>
+                    <div class="stat-value"><?php echo $stats['active'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card inactive">
+                    <div class="stat-label">Inactive</div>
+                    <div class="stat-value"><?php echo $stats['inactive'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card pending">
+                    <div class="stat-label">Pending</div>
+                    <div class="stat-value"><?php echo $stats['pending'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card suspended">
+                    <div class="stat-label">Suspended</div>
+                    <div class="stat-value"><?php echo $stats['suspended'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card admins">
+                    <div class="stat-label">Administrators</div>
+                    <div class="stat-value"><?php echo $stats['admins'] ?? 0; ?></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active (30 days)</div>
+                    <div class="stat-value"><?php echo $stats['active_last_month'] ?? 0; ?></div>
+                </div>
             </div>
             
-            <div class="filters">
-                <div>
-                    <label>Filter by Role:</label>
-                    <select name="role" onchange="window.location='?role='+this.value+'&status=<?php echo htmlspecialchars($statusFilter); ?>&s=<?php echo htmlspecialchars($search); ?>'">
-                        <option value="">All Roles</option>
-                        <?php foreach ($roles as $roleValue => $roleName): ?>
-                            <option value="<?php echo $roleValue; ?>" <?php echo $roleFilter === $roleValue ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($roleName); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+            <!-- Header with Actions -->
+            <div class="users-header">
+                <a href="?action=add" class="page-title-action button button-primary">➕ Add New User</a>
+                <div class="view-toggle">
+                    <button class="view-btn active" onclick="setView('table')" data-view="table">📋 Table</button>
+                    <button class="view-btn" onclick="setView('grid')" data-view="grid">🔲 Grid</button>
                 </div>
-                <div>
-                    <label>Filter by Status:</label>
-                    <select name="status" onchange="window.location='?status='+this.value+'&role=<?php echo htmlspecialchars($roleFilter); ?>&s=<?php echo htmlspecialchars($search); ?>'">
-                        <option value="">All Statuses</option>
-                        <?php foreach ($statuses as $statusValue => $statusName): ?>
-                            <option value="<?php echo $statusValue; ?>" <?php echo $statusFilter === $statusValue ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($statusName); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+            </div>
+            
+            <!-- Search and Filters -->
+            <div class="users-search-filters">
+                <form method="get" class="search-filters-row">
+                    <div>
+                        <label>Search Users</label>
+                        <input type="search" name="s" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search by name, email, username...">
+                    </div>
+                    <div>
+                        <label>Filter by Role</label>
+                        <select name="role" onchange="this.form.submit()">
+                            <option value="">All Roles</option>
+                            <?php foreach ($roles as $roleValue => $roleName): ?>
+                                <option value="<?php echo $roleValue; ?>" <?php echo $roleFilter === $roleValue ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($roleName); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Filter by Status</label>
+                        <select name="status" onchange="this.form.submit()">
+                            <option value="">All Statuses</option>
+                            <?php foreach ($statuses as $statusValue => $statusName): ?>
+                                <option value="<?php echo $statusValue; ?>" <?php echo $statusFilter === $statusValue ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($statusName); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: flex-end;">
+                        <button type="submit" class="button button-primary">🔍 Search</button>
+                        <?php if ($search || $roleFilter || $statusFilter): ?>
+                            <a href="users.php" class="button">Clear</a>
+                        <?php endif; ?>
+                    </div>
+                </form>
             </div>
             
             <form method="post" id="users-form">
@@ -623,11 +1341,13 @@ if (defined('APP_URL')) {
                             <option value="<?php echo $roleValue; ?>"><?php echo htmlspecialchars($roleName); ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <input type="submit" value="Apply" class="button">
-                    <span id="selected-count">0 items selected</span>
+                    <button type="submit" class="button button-primary">Apply</button>
+                    <span id="selected-count" style="color: #646970; font-weight: 600;">0 items selected</span>
                 </div>
                 
-                <table class="wp-list-table widefat fixed striped">
+                <!-- Table View -->
+                <div id="table-view">
+                    <table class="wp-list-table widefat fixed striped">
                     <thead>
                         <tr>
                             <th style="width: 30px;"><input type="checkbox" id="select-all"></th>
@@ -644,8 +1364,10 @@ if (defined('APP_URL')) {
                     <tbody>
                         <?php if (empty($users)): ?>
                             <tr>
-                                <td colspan="9" style="text-align: center; padding: 40px; color: #646970;">
-                                    No users found.
+                                <td colspan="9" style="text-align: center; padding: 60px 20px; color: #646970;">
+                                    <div class="empty-state-icon" style="font-size: 48px; margin-bottom: 15px;">👥</div>
+                                    <h3 style="margin: 0 0 10px 0; color: #1d2327;">No Users Found</h3>
+                                    <p style="margin: 0;">No users match your search criteria.</p>
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -658,11 +1380,11 @@ if (defined('APP_URL')) {
                                         <?php if (!empty($u['avatar'])): ?>
                                             <img src="<?php echo $baseUrl . '/' . htmlspecialchars($u['avatar']); ?>" alt="" class="user-avatar">
                                         <?php else: ?>
-                                            <div class="user-avatar" style="background: #c3c4c7; display: inline-flex; align-items: center; justify-content: center; color: white; font-weight: bold;">
+                                            <div class="user-avatar-placeholder">
                                                 <?php echo strtoupper(substr($u['username'], 0, 1)); ?>
                                             </div>
                                         <?php endif; ?>
-                                        <strong><a href="?action=edit&id=<?php echo $u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></a></strong>
+                                        <strong><a href="?action=edit&id=<?php echo $u['id']; ?>" style="color: #2271b1; text-decoration: none;"><?php echo htmlspecialchars($u['username']); ?></a></strong>
                                     </td>
                                     <td><?php echo htmlspecialchars(trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? '')) ?: $u['display_name'] ?? $u['username']); ?></td>
                                     <td><?php echo htmlspecialchars($u['email']); ?></td>
@@ -701,7 +1423,93 @@ if (defined('APP_URL')) {
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </tbody>
-                </table>
+                    </table>
+                </div>
+                
+                <!-- Grid View -->
+                <div id="grid-view" style="display: none;">
+                    <div class="users-grid">
+                        <?php if (empty($users)): ?>
+                            <div class="empty-state" style="grid-column: 1 / -1;">
+                                <div class="empty-state-icon">👥</div>
+                                <h3>No Users Found</h3>
+                                <p>No users match your search criteria.</p>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($users as $u): ?>
+                                <div class="user-card">
+                                    <div class="user-card-header">
+                                        <?php if (!empty($u['avatar'])): ?>
+                                            <img src="<?php echo $baseUrl . '/' . htmlspecialchars($u['avatar']); ?>" alt="" class="user-card-avatar">
+                                        <?php else: ?>
+                                            <div class="user-card-avatar-placeholder">
+                                                <?php echo strtoupper(substr($u['username'], 0, 1)); ?>
+                                            </div>
+                                        <?php endif; ?>
+                                        <div class="user-card-info">
+                                            <h3 class="user-card-name">
+                                                <a href="?action=edit&id=<?php echo $u['id']; ?>" style="color: #1d2327; text-decoration: none;">
+                                                    <?php echo htmlspecialchars(trim(($u['first_name'] ?? '') . ' ' . ($u['last_name'] ?? '')) ?: $u['display_name'] ?? $u['username']); ?>
+                                                </a>
+                                            </h3>
+                                            <p class="user-card-username">@<?php echo htmlspecialchars($u['username']); ?></p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div style="margin-bottom: 10px;">
+                                        <?php 
+                                        $userStatus = $u['status'] ?? 'active';
+                                        if (!isset($statuses[$userStatus])) {
+                                            $userStatus = 'active';
+                                        }
+                                        ?>
+                                        <span class="user-status user-status-<?php echo $userStatus; ?>">
+                                            <?php echo htmlspecialchars($statuses[$userStatus] ?? 'Active'); ?>
+                                        </span>
+                                        <span style="margin-left: 8px; color: #646970; font-size: 13px;">
+                                            <?php echo htmlspecialchars($roles[$u['role']] ?? $u['role']); ?>
+                                        </span>
+                                    </div>
+                                    
+                                    <div class="user-card-meta">
+                                        <div class="user-card-meta-item">
+                                            <span class="user-card-meta-label">Posts</span>
+                                            <span class="user-card-meta-value"><?php echo $u['post_count'] ?? 0; ?></span>
+                                        </div>
+                                        <div class="user-card-meta-item">
+                                            <span class="user-card-meta-label">Pages</span>
+                                            <span class="user-card-meta-value"><?php echo $u['page_count'] ?? 0; ?></span>
+                                        </div>
+                                        <div class="user-card-meta-item">
+                                            <span class="user-card-meta-label">Logins</span>
+                                            <span class="user-card-meta-value"><?php echo $u['login_count'] ?? 0; ?></span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div style="font-size: 12px; color: #646970; margin: 10px 0;">
+                                        <strong>Email:</strong> <?php echo htmlspecialchars($u['email']); ?><br>
+                                        <?php if (!empty($u['last_login'])): ?>
+                                            <strong>Last Login:</strong> <?php echo date('M j, Y H:i', strtotime($u['last_login'])); ?>
+                                        <?php else: ?>
+                                            <strong>Last Login:</strong> Never
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <div class="user-card-actions">
+                                        <input type="checkbox" name="users[]" value="<?php echo $u['id']; ?>" class="user-checkbox" style="margin-right: auto;">
+                                        <a href="?action=edit&id=<?php echo $u['id']; ?>" class="button button-small">Edit</a>
+                                        <?php if ($u['id'] != $_SESSION['cms_user_id']): ?>
+                                            <form method="post" style="display: inline;" onsubmit="return confirm('Delete this user?');">
+                                                <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
+                                                <button type="submit" name="delete_user" style="background: #d63638; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-size: 12px;">Delete</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </form>
             
             <?php if ($totalUsers > $perPage): ?>
@@ -767,25 +1575,49 @@ if (defined('APP_URL')) {
             }
         });
         
+        // View toggle
+        function setView(view) {
+            localStorage.setItem('usersView', view);
+            const tableView = document.getElementById('table-view');
+            const gridView = document.getElementById('grid-view');
+            const buttons = document.querySelectorAll('.view-btn');
+            
+            buttons.forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-view') === view) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            if (view === 'table') {
+                tableView.style.display = 'block';
+                gridView.style.display = 'none';
+            } else {
+                tableView.style.display = 'none';
+                gridView.style.display = 'block';
+            }
+        }
+        
+        // Load saved view preference
+        const savedView = localStorage.getItem('usersView') || 'table';
+        if (savedView) {
+            setView(savedView);
+        }
+        
         // Avatar preview
         function previewAvatar(input) {
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    let preview = document.getElementById('avatar-preview');
-                    if (!preview) {
-                        preview = document.createElement('img');
-                        preview.id = 'avatar-preview';
-                        preview.style.width = '150px';
-                        preview.style.height = '150px';
-                        preview.style.borderRadius = '50%';
-                        preview.style.objectFit = 'cover';
-                        preview.style.border = '3px solid #c3c4c7';
+                    const preview = document.getElementById('avatar-preview');
+                    const placeholder = document.getElementById('avatar-placeholder');
+                    if (preview) {
+                        preview.src = e.target.result;
                         preview.style.display = 'block';
-                        preview.style.margin = '0 auto';
-                        input.parentElement.insertBefore(preview, input);
                     }
-                    preview.src = e.target.result;
+                    if (placeholder) {
+                        placeholder.style.display = 'none';
+                    }
                 };
                 reader.readAsDataURL(input.files[0]);
             }

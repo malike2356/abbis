@@ -16,16 +16,28 @@ if (php_sapi_name() !== 'cli') {
     $auth->requireRole([ROLE_ADMIN]);
 }
 
-$notification = new EmailNotification();
-$result = $notification->processQueue(50); // Process up to 50 emails
+try {
+    $notification = new EmailNotification();
+    $result = $notification->processQueue(50); // Process up to 50 emails
 
-if (php_sapi_name() === 'cli') {
-    echo "Email Queue Processing:\n";
-    echo "  Sent: {$result['sent']}\n";
-    echo "  Failed: {$result['failed']}\n";
-    echo "  Total: {$result['total']}\n";
-} else {
-    header('Content-Type: application/json');
-    echo json_encode($result);
+    if (php_sapi_name() === 'cli') {
+        echo "Email Queue Processing:\n";
+        echo "  Sent: {$result['sent']}\n";
+        echo "  Failed: {$result['failed']}\n";
+        echo "  Total: {$result['total']}\n";
+    } else {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true, 'result' => $result]);
+    }
+} catch (Exception $e) {
+    if (php_sapi_name() === 'cli') {
+        echo "Error: " . $e->getMessage() . "\n";
+    } else {
+        header('Content-Type: application/json');
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    error_log("process-email-queue.php error: " . $e->getMessage());
+    exit(1);
 }
 

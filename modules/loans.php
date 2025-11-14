@@ -9,8 +9,10 @@ require_once '../config/security.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/helpers.php';
+require_once '../includes/AccountingAutoTracker.php';
 
 $auth->requireAuth();
+$auth->requirePermission('finance.access');
 
 $pdo = getDBConnection();
 
@@ -46,6 +48,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, ?, ?, ?, ?, CURDATE(), ?)
                 ");
                 $stmt->execute([$workerId, $workerName, $loanAmount, $loanAmount, $purpose, $_SESSION['user_id']]);
+                $loanId = $pdo->lastInsertId();
+
+                // Automatically track loan disbursement in accounting - runs for EVERY new loan
+                try {
+                    // Ensure accounting tables exist
+                    try {
+                        $pdo->query("SELECT 1 FROM chart_of_accounts LIMIT 1");
+                    } catch (PDOException $e) {
+                        // Initialize if needed
+                        $migrationFile = __DIR__ . '/../database/accounting_migration.sql';
+                        if (file_exists($migrationFile)) {
+                            $sql = file_get_contents($migrationFile);
+                            if ($sql) {
+                                foreach (preg_split('/;\s*\n/', $sql) as $stmt) {
+                                    $stmt = trim($stmt);
+                                    if ($stmt) {
+                                        try {
+                                            $pdo->exec($stmt);
+                                        } catch (PDOException $e2) {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    $accountingTracker = new AccountingAutoTracker($pdo);
+                    $result = $accountingTracker->trackLoanDisbursement($loanId, [
+                        'worker_name' => $workerName,
+                        'loan_amount' => $loanAmount,
+                        'issue_date' => date('Y-m-d'),
+                        'created_by' => $_SESSION['user_id']
+                    ]);
+                    
+                    if ($result) {
+                        error_log("Accounting: Auto-tracked loan disbursement ID {$loanId}");
+                    }
+                } catch (Exception $e) {
+                    error_log("Accounting auto-tracking error for loan ID {$loanId}: " . $e->getMessage());
+                }
                 
                 flash('success', "Loan added successfully for $workerName");
                 break;
@@ -92,8 +133,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, ?, CURDATE(), ?, ?)
                 ");
                 $repaymentStmt->execute([$loanId, $repaymentAmount, $notes, $_SESSION['user_id']]);
-                
+                $repaymentId = $pdo->lastInsertId();
+
                 $pdo->commit();
+
+                // Automatically track loan repayment in accounting - runs for EVERY repayment
+                try {
+                    // Ensure accounting tables exist
+                    try {
+                        $pdo->query("SELECT 1 FROM chart_of_accounts LIMIT 1");
+                    } catch (PDOException $e) {
+                        // Initialize if needed
+                        $migrationFile = __DIR__ . '/../database/accounting_migration.sql';
+                        if (file_exists($migrationFile)) {
+                            $sql = file_get_contents($migrationFile);
+                            if ($sql) {
+                                foreach (preg_split('/;\s*\n/', $sql) as $stmt) {
+                                    $stmt = trim($stmt);
+                                    if ($stmt) {
+                                        try {
+                                            $pdo->exec($stmt);
+                                        } catch (PDOException $e2) {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    $accountingTracker = new AccountingAutoTracker($pdo);
+                    $result = $accountingTracker->trackLoanRepayment($repaymentId, [
+                        'worker_name' => $loan['worker_name'] ?? '',
+                        'repayment_amount' => $repaymentAmount,
+                        'repayment_date' => date('Y-m-d'),
+                        'created_by' => $_SESSION['user_id']
+                    ]);
+                    
+                    if ($result) {
+                        error_log("Accounting: Auto-tracked loan repayment ID {$repaymentId}");
+                    }
+                } catch (Exception $e) {
+                    error_log("Accounting auto-tracking error for repayment ID {$repaymentId}: " . $e->getMessage());
+                }
                 
                 flash('success', "Repayment of " . formatCurrency($repaymentAmount) . " recorded successfully");
                 break;

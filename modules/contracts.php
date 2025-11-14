@@ -20,6 +20,10 @@ try {
 // Handle upload
 $message = null; $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload') {
+    // CSRF protection
+    if (!CSRF::validateToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid security token';
+    } else {
     try {
         if (!isset($_FILES['contract_file']) || $_FILES['contract_file']['error'] !== UPLOAD_ERR_OK) {
             throw new RuntimeException('No file uploaded or upload error.');
@@ -47,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } catch (Throwable $t) {
         $error = $t->getMessage();
     }
+    } // End CSRF else block
 }
 
 // Fetch contracts
@@ -74,6 +79,7 @@ require_once '../includes/header.php';
     <div class="card" style="padding:16px; margin-bottom:16px;">
         <h3>Upload Contract</h3>
         <form method="post" enctype="multipart/form-data">
+            <?php echo CSRF::getTokenField(); ?>
             <input type="hidden" name="action" value="upload">
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
                 <div>

@@ -19,8 +19,8 @@ try {
             break;
         case 'export_qb':
         case 'export_zoho':
-            // Placeholder for QuickBooks/Zoho export adapters
-            echo json_encode(['success'=>true,'message'=>'Export initiated']);
+            // Redirect to accounting-export.php
+            require_once 'accounting-export.php';
             break;
         default:
             echo json_encode(['success'=>false,'message'=>'Unknown action']);

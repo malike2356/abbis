@@ -7,18 +7,11 @@ $rootPath = dirname(dirname(__DIR__));
 require_once $rootPath . '/config/app.php';
 require_once $rootPath . '/includes/functions.php';
 
-// Get base URL
-$baseUrl = '/abbis3.2';
-if (defined('APP_URL')) {
-    $parsed = parse_url(APP_URL);
-    $baseUrl = $parsed['path'] ?? '/abbis3.2';
-}
-
 // Set redirect after login to CMS
-$_SESSION['redirect_after_login'] = $baseUrl . '/cms/admin/index.php';
+$_SESSION['redirect_after_login'] = app_url('cms/admin/index.php');
 $_SESSION['cms_login_destination'] = true;
 
 // Redirect to unified login
-header('Location: ' . $baseUrl . '/login.php?redirect=cms');
+header('Location: ' . app_url('login.php?redirect=cms'));
 exit;
 

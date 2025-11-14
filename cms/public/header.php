@@ -1,606 +1,388 @@
 <?php
 /**
- * CMS Public Header - Persistent Navigation
- * This header persists across all CMS public pages (like WordPress)
+ * CMS Public Header - shared across all public-facing pages
  */
-if (!defined('CMS_HEADER_LOADED')) {
-    define('CMS_HEADER_LOADED', true);
-    
-    // Only load data if not already loaded
-    if (!isset($pdo)) {
-        $rootPath = dirname(dirname(__DIR__));
-        require_once $rootPath . '/config/app.php';
-        require_once $rootPath . '/includes/functions.php';
+if (!defined('CMS_PUBLIC_HEADER_BOOTSTRAPPED')) {
+    define('CMS_PUBLIC_HEADER_BOOTSTRAPPED', true);
+
+    $rootPath = dirname(dirname(__DIR__));
+    require_once $rootPath . '/config/app.php';
+    require_once $rootPath . '/includes/functions.php';
+    require_once __DIR__ . '/base-url.php';
+    require_once __DIR__ . '/menu-functions.php';
+    require_once __DIR__ . '/get-site-name.php';
+
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
         $pdo = getDBConnection();
     }
-    
-    // Get base URL if not set
-    if (!isset($baseUrl)) {
-        require_once __DIR__ . '/base-url.php';
+
+    // Determine active theme
+    $activeThemeSlug = 'default';
+    $activeThemeBaseUrl = '';
+    $activeThemeDir = dirname(__DIR__) . '/themes';
+    try {
+        $themeStmt = $pdo->query("SELECT slug FROM cms_themes WHERE is_active=1 LIMIT 1");
+        $activeTheme = $themeStmt->fetch(PDO::FETCH_ASSOC);
+        if (!empty($activeTheme['slug'])) {
+            $activeThemeSlug = $activeTheme['slug'];
+        }
+    } catch (Throwable $e) {
+        // ignore
     }
-    
-    // Get CMS settings FIRST (needed for site name)
-    if (!isset($cmsSettings)) {
+
+    $baseThemeDir = $activeThemeDir . '/' . $activeThemeSlug;
+    $activeThemeAssetsUrl = '';
+
+    // Load CMS settings (site title, logo, tagline, contact info, CTA)
+    $cmsSettings = $cmsSettings ?? [];
+    try {
         $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM cms_settings");
-        $cmsSettings = [];
-        while ($row = $settingsStmt->fetch()) {
+        while ($row = $settingsStmt->fetch(PDO::FETCH_ASSOC)) {
             $cmsSettings[$row['setting_key']] = $row['setting_value'];
         }
+    } catch (Throwable $e) {
+        // Ignore and continue with defaults
     }
-    
-    // Get site name from CMS settings (backend) - use consistent helper
-    require_once __DIR__ . '/get-site-name.php';
-    if (!isset($companyName) || empty($companyName)) {
-        $companyName = getCMSSiteName('Our Company');
+
+    // Load system config fallbacks (company name, logo, contact)
+    $systemConfig = [];
+    try {
+        $configStmt = $pdo->query("SELECT config_key, config_value FROM system_config WHERE config_key IN ('company_name','company_logo','company_phone','company_email','company_tagline')");
+        while ($row = $configStmt->fetch(PDO::FETCH_ASSOC)) {
+            $systemConfig[$row['config_key']] = $row['config_value'];
+        }
+    } catch (Throwable $e) {
+        // Ignore if table missing
     }
-    
-    // Get active theme
-    if (!isset($theme)) {
-        $themeStmt = $pdo->query("SELECT * FROM cms_themes WHERE is_active=1 LIMIT 1");
-        $theme = $themeStmt->fetch(PDO::FETCH_ASSOC) ?: ['slug'=>'default','config'=>'{}'];
-        $themeConfig = json_decode($theme['config'] ?? '{}', true);
-    } else {
-        $themeConfig = json_decode($theme['config'] ?? '{}', true);
-    }
-    
-    // Get menu items (primary navigation) - use menu location system
-    require_once __DIR__ . '/menu-functions.php';
-    if (!isset($menuItems)) {
-        $menuItems = getMenuItemsForLocation('primary', $pdo);
-    }
-    
-    // Get cart count for shop/cart links
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-    $cartCount = 0;
-    if (isset($_SESSION['cart_id'])) {
-        try {
-            $cartStmt = $pdo->prepare("SELECT SUM(quantity) FROM cms_cart_items WHERE session_id=?");
-            $cartStmt->execute([$_SESSION['cart_id']]);
-            $cartCount = (int)$cartStmt->fetchColumn() ?: 0;
-        } catch (Throwable $e) {
-            $cartCount = 0;
+
+    $baseUrl = rtrim($baseUrl ?? app_base_path(), '/');
+    $companyName = getCMSSiteName($systemConfig['company_name'] ?? 'ABBIS');
+    $tagline = $cmsSettings['site_tagline'] ?? ($systemConfig['company_tagline'] ?? 'Advanced Borehole Business Intelligence System');
+
+    // Determine logo URL (prefer CMS setting, fallback to system config)
+    $logoCandidate = $cmsSettings['site_logo'] ?? ($systemConfig['company_logo'] ?? '');
+    $logoUrl = '';
+    if (!empty($logoCandidate)) {
+        if (filter_var($logoCandidate, FILTER_VALIDATE_URL)) {
+            $logoUrl = $logoCandidate;
+        } else {
+            $logoUrl = $baseUrl . '/' . ltrim($logoCandidate, '/');
         }
     }
-    
-    // Theme colors
-    $primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
-    $headerBg = $themeConfig['header_bg'] ?? '#ffffff';
-    $headerTextColor = $themeConfig['header_text_color'] ?? '#1e293b';
-    
-    // Current page detection for active menu items
-    $currentPath = $_SERVER['REQUEST_URI'] ?? '';
-    $currentPath = preg_replace('#\?.*$#', '', $currentPath);
-?>
-<header class="cms-header" style="background: <?php echo htmlspecialchars($headerBg); ?>; color: <?php echo htmlspecialchars($headerTextColor); ?>;">
-    <div class="cms-header-content">
-        <div class="cms-header-main">
-            <a href="<?php echo $baseUrl; ?>/" class="cms-logo">
-                <?php 
-                $logoPath = $cmsSettings['site_logo'] ?? '';
-                $logoUrl = $logoPath ? $baseUrl . '/' . $logoPath : '';
-                if ($logoUrl): ?>
-                    <img src="<?php echo htmlspecialchars($logoUrl); ?>" alt="<?php echo htmlspecialchars($companyName); ?>" class="cms-logo-image" style="max-height: 50px; max-width: 200px; object-fit: contain;">
-                <?php else: ?>
-                    <span class="cms-logo-icon">💦</span>
-                    <span class="cms-logo-text"><?php echo htmlspecialchars($companyName); ?></span>
-                <?php endif; ?>
+
+    $contactPhone = $cmsSettings['contact_phone'] ?? ($systemConfig['company_phone'] ?? '');
+    $contactEmail = $cmsSettings['contact_email'] ?? ($systemConfig['company_email'] ?? '');
+    $ctaLabelSetting = trim($cmsSettings['header_cta_label'] ?? '');
+    $ctaUrlSetting = trim($cmsSettings['header_cta_url'] ?? '');
+    $ctaLabel = $ctaLabelSetting !== '' ? $ctaLabelSetting : null;
+    $ctaUrl = $ctaUrlSetting !== '' ? $ctaUrlSetting : null;
+
+    $profileUrl = normaliseMenuUrl('/cms/profile', $baseUrl);
+    $adminLoginUrl = normaliseMenuUrl('/cms/admin/', $baseUrl);
+    $cartUrl = normaliseMenuUrl('/cms/cart', $baseUrl);
+
+    if ($activeThemeSlug !== '') {
+        $activeThemeAssetsUrl = rtrim($baseUrl, '/') . '/cms/themes/' . $activeThemeSlug . '/assets';
+    }
+
+    // Theme color handling for frontend
+    $themeColorKey = $cmsSettings['cms_theme_color'] ?? 'blue';
+    $customColor = trim($cmsSettings['cms_custom_primary_color'] ?? '');
+    $applyThemeFrontend = ($cmsSettings['cms_apply_theme_frontend'] ?? '1') === '1';
+    $themeColors = [
+        'blue' => '#2563eb',
+        'red' => '#dc2626',
+        'green' => '#16a34a',
+        'purple' => '#9333ea',
+        'orange' => '#ea580c',
+        'teal' => '#0d9488',
+        'pink' => '#db2777',
+        'indigo' => '#4f46e5',
+    ];
+
+    if (!function_exists('cms_lighten_color')) {
+        function cms_lighten_color(string $hex, int $percent = 20): string
+        {
+            $hex = ltrim($hex, '#');
+            if (strlen($hex) === 3) {
+                $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+            }
+            $percent = max(0, min(100, $percent));
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
+            $r = (int) min(255, $r + (255 - $r) * $percent / 100);
+            $g = (int) min(255, $g + (255 - $g) * $percent / 100);
+            $b = (int) min(255, $b + (255 - $b) * $percent / 100);
+            return sprintf('#%02x%02x%02x', $r, $g, $b);
+        }
+    }
+
+    if (!function_exists('cms_darken_color')) {
+        function cms_darken_color(string $hex, int $percent = 20): string
+        {
+            $hex = ltrim($hex, '#');
+            if (strlen($hex) === 3) {
+                $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+            }
+            $percent = max(0, min(100, $percent));
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
+            $r = (int) max(0, $r - ($r * $percent / 100));
+            $g = (int) max(0, $g - ($g * $percent / 100));
+            $b = (int) max(0, $b - ($b * $percent / 100));
+            return sprintf('#%02x%02x%02x', $r, $g, $b);
+        }
+    }
+
+    if (!function_exists('cms_hex_to_rgba')) {
+        function cms_hex_to_rgba(string $hex, float $alpha = 1.0): string
+        {
+            $hex = ltrim($hex, '#');
+            if (strlen($hex) === 3) {
+                $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+            }
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
+            $alpha = max(0, min(1, $alpha));
+            return sprintf('rgba(%d, %d, %d, %.3f)', $r, $g, $b, $alpha);
+        }
+    }
+
+    $primaryColor = $customColor !== '' ? $customColor : ($themeColors[$themeColorKey] ?? '#2563eb');
+    $primaryDark = cms_darken_color($primaryColor, 25);
+    $primaryDarker = cms_darken_color($primaryColor, 40);
+    $primaryLight = cms_lighten_color($primaryColor, 25);
+    $primaryLighter = cms_lighten_color($primaryColor, 50);
+    $primaryGradient = 'linear-gradient(90deg, ' . $primaryDarker . ' 0%, ' . $primaryLight . ' 100%)';
+    $primaryTint = cms_hex_to_rgba($primaryColor, 0.12);
+
+    // Primary navigation menu (location: primary)
+    $primaryMenuItems = [];
+    try {
+        $primaryMenuItems = getMenuItemsForLocation('primary', $pdo);
+    } catch (Throwable $e) {
+        $primaryMenuItems = [];
+    }
+
+    // Fallback menu if none configured
+    if (empty($primaryMenuItems)) {
+        $primaryMenuItems = [
+            ['id' => 'menu-home', 'parent_id' => null, 'label' => 'Home', 'url' => '/', 'css_class' => ''],
+            ['id' => 'menu-shop', 'parent_id' => null, 'label' => 'Shop', 'url' => '/cms/shop', 'css_class' => ''],
+            ['id' => 'menu-blog', 'parent_id' => null, 'label' => 'Blog', 'url' => '/cms/blog', 'css_class' => ''],
+            ['id' => 'menu-contact', 'parent_id' => null, 'label' => 'Contact', 'url' => '/cms/contact', 'css_class' => '']
+        ];
+    }
+
+    $GLOBALS['cmsPublicHeaderData'] = [
+        'companyName' => $companyName,
+        'tagline' => $tagline,
+        'logoUrl' => $logoUrl,
+        'baseUrl' => $baseUrl,
+        'contactPhone' => $contactPhone,
+        'contactEmail' => $contactEmail,
+        'ctaLabel' => $ctaLabel,
+        'ctaUrl' => $ctaUrl,
+        'menuItems' => $primaryMenuItems
+    ];
+}
+
+$headerData = $GLOBALS['cmsPublicHeaderData'] ?? [];
+$companyName = $headerData['companyName'] ?? 'ABBIS';
+$tagline = $headerData['tagline'] ?? '';
+$logoUrl = $headerData['logoUrl'] ?? '';
+$baseUrl = $headerData['baseUrl'] ?? app_base_path();
+$contactPhone = $headerData['contactPhone'] ?? '';
+$contactEmail = $headerData['contactEmail'] ?? '';
+$ctaLabel = trim($headerData['ctaLabel'] ?? '');
+$ctaUrl = trim($headerData['ctaUrl'] ?? '');
+$ctaText = $ctaLabel;
+$ctaHref = $ctaUrl !== '' ? normaliseMenuUrl($ctaUrl, $baseUrl) : '';
+$menuItems = $headerData['menuItems'] ?? [];
+
+$assetBaseUrl = rtrim($baseUrl, '/') . '/cms/public/assets';
+$headerCssPath = __DIR__ . '/assets/css/global-header.css';
+$headerJsPath = __DIR__ . '/assets/js/global-header.js';
+$headerInitial = 'A';
+$sanitisedName = preg_replace('/[^A-Za-z0-9]/', '', $companyName);
+if (!empty($sanitisedName)) {
+    $headerInitial = strtoupper(substr($sanitisedName, 0, 1));
+}
+
+if (!defined('CMS_PUBLIC_HEADER_STYLES_OUTPUT')) {
+    define('CMS_PUBLIC_HEADER_STYLES_OUTPUT', true);
+    if (is_file($headerCssPath)) {
+        $css = @file_get_contents($headerCssPath);
+        if ($css !== false) {
+            echo '<style data-origin="cms-global-header">';
+            echo $css;
+            echo '</style>';
+        }
+    }
+
+    $themeHeaderCssPath = $baseThemeDir . '/assets/css/header.css';
+    if (is_file($themeHeaderCssPath) && $activeThemeAssetsUrl !== '') {
+        $headerCssVersion = (string)@filemtime($themeHeaderCssPath);
+        echo '<link rel="stylesheet" href="' . htmlspecialchars($activeThemeAssetsUrl . '/css/header.css?v=' . $headerCssVersion) . '" data-origin="cms-theme-header">';
+    }
+
+    if ($applyThemeFrontend) {
+        echo '<style data-origin="cms-theme-colors">';
+        echo ':root{';
+        echo '--cms-header-accent:' . htmlspecialchars($primaryColor) . ';';
+        echo '--cms-header-accent-dark:' . htmlspecialchars($primaryDark) . ';';
+        echo '--cms-header-topbar-bg:' . htmlspecialchars($primaryGradient) . ';';
+        echo '--cms-header-shadow:0 18px 40px ' . htmlspecialchars(cms_hex_to_rgba($primaryColor, 0.18)) . ';';
+        echo '--cms-header-border:' . htmlspecialchars(cms_hex_to_rgba($primaryColor, 0.22)) . ';';
+        echo '}';
+        echo '.cms-btn-primary, .btn-primary, button.primary, .primary-button{background:' . htmlspecialchars($primaryColor) . ';border-color:' . htmlspecialchars($primaryDark) . ';color:#fff;}';
+        echo '.cms-btn-primary:hover, .btn-primary:hover, button.primary:hover, .primary-button:hover{background:' . htmlspecialchars($primaryDark) . ';border-color:' . htmlspecialchars($primaryDarker) . ';}';
+        echo 'a, .link-primary{color:' . htmlspecialchars($primaryColor) . ';}';
+        echo 'a:hover, a:focus, .link-primary:hover{color:' . htmlspecialchars($primaryDark) . ';}';
+        echo '.cms-brand__logo{background:' . htmlspecialchars($primaryTint) . ';}';
+        echo '.cms-header-topbar__cta a{background:' . htmlspecialchars(cms_hex_to_rgba($primaryColor, 0.18)) . ';}';
+        echo '.cms-header-topbar__cta a:hover{background:' . htmlspecialchars(cms_hex_to_rgba($primaryColor, 0.28)) . ';}';
+        echo '.cms-hero-button, .cms-cta-button{background:' . htmlspecialchars($primaryColor) . '; border-color:' . htmlspecialchars($primaryDark) . '; color:#fff;}';
+        echo '.cms-hero-button:hover, .cms-cta-button:hover{background:' . htmlspecialchars($primaryDark) . '; border-color:' . htmlspecialchars($primaryDarker) . ';}';
+        echo '</style>';
+    }
+}
+
+if (!defined('CMS_PUBLIC_HEADER_SCRIPTS_OUTPUT')) {
+    define('CMS_PUBLIC_HEADER_SCRIPTS_OUTPUT', true);
+    if (is_file($headerJsPath)) {
+        $version = (string)@filemtime($headerJsPath);
+        echo '<script defer src="' . htmlspecialchars($assetBaseUrl . '/js/global-header.js?v=' . $version) . '"></script>';
+    }
+
+    $themeHeaderJsPath = $baseThemeDir . '/assets/js/header.js';
+    if (is_file($themeHeaderJsPath) && $activeThemeAssetsUrl !== '') {
+        $headerJsVersion = (string)@filemtime($themeHeaderJsPath);
+        echo '<script defer src="' . htmlspecialchars($activeThemeAssetsUrl . '/js/header.js?v=' . $headerJsVersion) . '"></script>';
+    }
+}
+
+if (!defined('CMS_PUBLIC_HEADER_RENDERED')) {
+    define('CMS_PUBLIC_HEADER_RENDERED', true);
+    ?>
+    <script>
+    (function () {
+        function resolveExtra(main) {
+            if (!main) {
+                return window.innerWidth < 768 ? 24 : 16;
+            }
+            if (main.dataset && main.dataset.offsetExtra !== undefined) {
+                var parsed = parseInt(main.dataset.offsetExtra, 10);
+                if (!isNaN(parsed)) {
+                    return parsed;
+                }
+            }
+            return window.innerWidth < 768 ? 24 : 16;
+        }
+
+        function updateLayoutOffset() {
+            var header = document.querySelector('.cms-global-header');
+            if (!header) {
+                return;
+            }
+
+            var main = document.querySelector('main.cms-site-main, main[role=\"main\"], main');
+            var headerHeight = Math.ceil(header.getBoundingClientRect().height);
+            var totalOffset = headerHeight + resolveExtra(main);
+
+            document.documentElement.style.setProperty('--cms-body-offset', totalOffset + 'px');
+            document.body.style.removeProperty('padding-top');
+
+            if (main) {
+                main.style.setProperty('scroll-margin-top', (totalOffset + 16) + 'px');
+                if (!main.hasAttribute('data-cms-offset-manual')) {
+                    main.style.setProperty('margin-top', totalOffset + 'px');
+                } else {
+                    main.style.removeProperty('margin-top');
+                }
+            } else {
+                document.body.style.setProperty('padding-top', totalOffset + 'px');
+            }
+        }
+
+        window.addEventListener('load', updateLayoutOffset);
+        window.addEventListener('resize', updateLayoutOffset);
+        document.addEventListener('DOMContentLoaded', updateLayoutOffset);
+        updateLayoutOffset();
+    })();
+    </script>
+    <header class="cms-global-header" role="banner" data-header data-base="<?php echo htmlspecialchars($baseUrl); ?>">
+        <div class="cms-header-inner">
+            <a href="<?php echo htmlspecialchars($baseUrl); ?>/" class="cms-brand">
+                <span class="cms-brand__logo" aria-hidden="true">
+                    <?php if ($logoUrl): ?>
+                        <img src="<?php echo htmlspecialchars($logoUrl); ?>" alt="">
+                    <?php else: ?>
+                        <span><?php echo htmlspecialchars($headerInitial); ?></span>
+                    <?php endif; ?>
+                </span>
+                <span class="cms-brand__identity">
+                    <span class="cms-brand__name"><?php echo htmlspecialchars($companyName); ?></span>
+                    <?php if ($tagline): ?>
+                        <span class="cms-brand__tagline"><?php echo htmlspecialchars($tagline); ?></span>
+                    <?php endif; ?>
+                </span>
             </a>
-            
-            <nav class="cms-primary-nav">
-                <?php if (!empty($menuItems)): ?>
+            <nav class="cms-nav" id="cmsPrimaryNav" role="navigation" aria-label="Primary navigation" tabindex="-1">
+                <div class="cms-nav-menu">
                     <?php echo renderMenuItems($menuItems, null, 0, 'header'); ?>
+                </div>
+                <?php if ($contactPhone || $contactEmail): ?>
+                <div class="cms-header-actions__contact">
+                    <?php if ($contactPhone): ?>
+                        <a class="cms-header-contact-link" href="tel:<?php echo htmlspecialchars(preg_replace('/\s+/', '', $contactPhone)); ?>">
+                            <span aria-hidden="true">📞</span>
+                            <span><?php echo htmlspecialchars($contactPhone); ?></span>
+                        </a>
+                    <?php endif; ?>
+                    <?php if ($contactEmail): ?>
+                        <a class="cms-header-contact-link" href="mailto:<?php echo htmlspecialchars($contactEmail); ?>">
+                            <span aria-hidden="true">✉️</span>
+                            <span><?php echo htmlspecialchars($contactEmail); ?></span>
+                        </a>
+                    <?php endif; ?>
+                </div>
                 <?php endif; ?>
             </nav>
-            
             <div class="cms-header-actions">
-                <a href="<?php echo $baseUrl; ?>/cms/cart" class="cms-cart-link">
-                    <span class="cms-cart-icon">🛒</span>
-                    <span class="cms-cart-text">Cart</span>
-                    <?php if ($cartCount > 0): ?>
-                        <span class="cms-cart-badge"><?php echo $cartCount; ?></span>
-                    <?php endif; ?>
+                <?php if ($ctaText !== '' && $ctaHref !== ''): ?>
+                <a class="cms-header-actions__cta" href="<?php echo htmlspecialchars($ctaHref); ?>">
+                    <span><?php echo htmlspecialchars($ctaText); ?></span>
                 </a>
-                
-                <?php
-                // Check if user is logged into CMS
-                require_once __DIR__ . '/../admin/auth.php';
-                $cmsAuth = new CMSAuth();
-                $isLoggedIntoCMS = $cmsAuth->isLoggedIn();
-                $currentUser = $isLoggedIntoCMS ? $cmsAuth->getCurrentUser() : null;
-                
-                if ($isLoggedIntoCMS && $currentUser):
-                    // Display avatar or initials
-                    $avatar = $currentUser['avatar'] ?? '';
-                    $displayName = $currentUser['display_name'] ?? $currentUser['first_name'] ?? $currentUser['username'] ?? 'User';
-                    $initials = strtoupper(substr($displayName, 0, 1));
-                    $avatarPath = '';
-                    if ($avatar) {
-                        $fullPath = str_replace($baseUrl . '/', '', $avatar);
-                        $fullPath = dirname(dirname(__DIR__)) . '/' . ltrim($fullPath, '/');
-                        if (file_exists($fullPath)) {
-                            $avatarPath = $baseUrl . '/' . ltrim($avatar, '/');
-                        }
-                    }
-                ?>
-                <!-- Account Dropdown (Logged In) -->
-                <div class="cms-account-dropdown">
-                    <button class="cms-account-toggle" onclick="toggleAccountDropdown()" aria-label="Account Menu">
-                        <?php if ($avatarPath): ?>
-                            <img src="<?php echo htmlspecialchars($avatarPath); ?>" alt="Profile" class="cms-account-avatar">
-                        <?php else: ?>
-                            <span class="cms-account-initials"><?php echo htmlspecialchars($initials); ?></span>
-                        <?php endif; ?>
-                        <span class="cms-account-name"><?php echo htmlspecialchars($displayName); ?></span>
-                        <span class="cms-dropdown-arrow">▼</span>
-                    </button>
-                    <div class="cms-account-menu" id="accountDropdown">
-                        <a href="<?php echo $baseUrl; ?>/cms/profile" class="cms-menu-item">
-                            <span class="cms-menu-icon">👤</span>
-                            <span>View Profile</span>
-                        </a>
-                        <a href="<?php echo $baseUrl; ?>/cms/admin/" class="cms-menu-item">
-                            <span class="cms-menu-icon">⚙️</span>
-                            <span>Dashboard</span>
-                        </a>
-                        <div class="cms-menu-divider"></div>
-                        <a href="<?php echo $baseUrl; ?>/cms/admin/logout.php" class="cms-menu-item cms-menu-item-danger">
-                            <span class="cms-menu-icon">🚪</span>
-                            <span>Logout</span>
-                        </a>
-                    </div>
-                </div>
-                <?php else: ?>
-                <!-- Account Button (Not Logged In) -->
-                <div class="cms-account-dropdown">
-                    <a href="<?php echo $baseUrl; ?>/cms/admin/login.php" class="cms-account-login">
-                        <span class="cms-menu-icon">🔐</span>
-                        <span>Login</span>
-                    </a>
-                </div>
                 <?php endif; ?>
-                
-                <button class="cms-mobile-menu-toggle" aria-label="Toggle Menu">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
+                <a class="cms-header-icon" href="<?php echo htmlspecialchars($profileUrl); ?>" aria-label="Customer portal">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5zm0 2c-3.866 0-7 2.239-7 5v1h14v-1c0-2.761-3.134-5-7-5z"/>
+                    </svg>
+                </a>
+                <a class="cms-header-icon" href="<?php echo htmlspecialchars($adminLoginUrl); ?>" aria-label="Admin login">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1s-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v3h2V5h14v3h2V5c0-1.1-.9-2-2-2zm-7 4c-3.31 0-6 2.69-6 6s2.69 6 6 6c1.17 0 2.25-.34 3.18-.92l3.37 3.37 1.41-1.41-3.37-3.37c.58-.93.92-2.01.92-3.18 0-3.31-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
+                    </svg>
+                </a>
+                <a class="cms-header-icon" href="<?php echo htmlspecialchars($cartUrl); ?>" aria-label="View cart">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zm0 2h-.01H7zm10-2c-1.1 0-1.99.9-1.99 2S15.9 22 17 22s2-.9 2-2-.9-2-2-2zm-9.83-3h9.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20.58 6H6.21l-.94-2H1v2h2l3.6 7.59-.95 1.72A2 2 0 0 0 5.98 18H19v-2H7.42l.75-1.5z"/>
+                    </svg>
+                </a>
             </div>
+            <button class="cms-nav-toggle" id="cmsNavToggle" aria-expanded="false" aria-controls="cmsPrimaryNav">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span class="sr-only">Toggle navigation</span>
+            </button>
         </div>
-    </div>
-</header>
-
-<style>
-/* CMS Header Styles - WordPress-like persistent navigation */
-.cms-header {
-    background: <?php echo htmlspecialchars($headerBg); ?> !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 1000 !important;
-    width: 100% !important;
+        <div class="cms-nav-backdrop" id="cmsNavBackdrop" aria-hidden="true"></div>
+    </header>
+    <?php
 }
-
-.cms-header-content {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 0 2rem;
-}
-
-.cms-header-main {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem 0;
-    gap: 2rem;
-}
-
-.cms-logo {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
-    text-decoration: none;
-    transition: opacity 0.2s;
-}
-
-.cms-logo:hover {
-    opacity: 0.8;
-}
-
-.cms-logo-icon {
-    font-size: 1.75rem;
-}
-
-.cms-primary-nav {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-}
-
-.cms-nav-menu {
-    display: flex;
-    list-style: none;
-    gap: 2rem;
-    margin: 0;
-    padding: 0;
-    align-items: center;
-}
-
-.cms-nav-item {
-    margin: 0;
-    padding: 0;
-}
-
-.cms-nav-link {
-    color: <?php echo htmlspecialchars($headerTextColor); ?> !important;
-    text-decoration: none;
-    font-weight: 500;
-    font-size: 0.95rem;
-    padding: 0.5rem 0;
-    position: relative;
-    transition: color 0.2s;
-}
-
-.cms-nav-link:hover {
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
-}
-
-.cms-nav-item.active .cms-nav-link {
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
-    font-weight: 600;
-}
-
-.cms-nav-item.active .cms-nav-link::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: <?php echo htmlspecialchars($primaryColor); ?>;
-}
-
-/* Nested menu styles (dropdown) */
-.cms-nav-item {
-    position: relative;
-}
-
-.cms-submenu {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    background: white;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    border-radius: 4px;
-    min-width: 200px;
-    padding: 0.5rem 0;
-    margin-top: 0.5rem;
-    z-index: 1000;
-    list-style: none;
-    flex-direction: column;
-    gap: 0;
-}
-
-.cms-nav-item:hover > .cms-submenu {
-    display: block;
-}
-
-.cms-submenu-item {
-    margin: 0;
-}
-
-.cms-submenu-item .cms-nav-link {
-    display: block;
-    padding: 0.75rem 1.5rem;
-    color: #2c3338 !important;
-    font-weight: 400;
-}
-
-.cms-submenu-item .cms-nav-link:hover {
-    background: #f6f7f7;
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
-}
-
-.cms-submenu .cms-submenu {
-    left: 100%;
-    top: 0;
-    margin-top: 0;
-}
-
-.cms-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.cms-cart-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: <?php echo htmlspecialchars($headerTextColor); ?> !important;
-    text-decoration: none;
-    font-weight: 500;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    transition: background 0.2s;
-}
-
-.cms-cart-link:hover {
-    background: rgba(0,0,0,0.05);
-}
-
-/* Account Dropdown Styles */
-.cms-account-dropdown {
-    position: relative;
-    display: inline-block;
-}
-
-.cms-account-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: none;
-    border: 1px solid rgba(0,0,0,0.1);
-    color: <?php echo htmlspecialchars($headerTextColor); ?> !important;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.95rem;
-    font-weight: 500;
-    transition: all 0.2s;
-    font-family: inherit;
-}
-
-.cms-account-toggle:hover {
-    background: rgba(0,0,0,0.05);
-    border-color: <?php echo htmlspecialchars($primaryColor); ?>;
-}
-
-.cms-account-toggle:focus {
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
-}
-
-.cms-account-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-}
-
-.cms-account-initials {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: <?php echo htmlspecialchars($primaryColor); ?>;
-    color: white;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 0.875rem;
-    flex-shrink: 0;
-}
-
-.cms-account-name {
-    font-weight: 500;
-}
-
-.cms-dropdown-arrow {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    transition: transform 0.2s;
-}
-
-.cms-account-dropdown.active .cms-dropdown-arrow {
-    transform: rotate(180deg);
-}
-
-.cms-account-menu {
-    display: none;
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    right: 0;
-    background: white;
-    border: 1px solid rgba(0,0,0,0.1);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    min-width: 200px;
-    padding: 0.5rem 0;
-    z-index: 1000;
-}
-
-.cms-account-dropdown.active .cms-account-menu {
-    display: block;
-}
-
-.cms-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    color: #1e293b !important;
-    text-decoration: none;
-    font-size: 0.95rem;
-    transition: background 0.2s;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    cursor: pointer;
-}
-
-.cms-menu-item:hover {
-    background: #f1f5f9;
-    color: <?php echo htmlspecialchars($primaryColor); ?> !important;
-}
-
-.cms-menu-item-danger {
-    color: #dc2626 !important;
-}
-
-.cms-menu-item-danger:hover {
-    background: #fee2e2;
-    color: #991b1b !important;
-}
-
-.cms-menu-icon {
-    font-size: 1.125rem;
-    width: 20px;
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.cms-menu-divider {
-    height: 1px;
-    background: #e2e8f0;
-    margin: 0.5rem 0;
-}
-
-.cms-account-login {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: <?php echo htmlspecialchars($headerTextColor); ?> !important;
-    text-decoration: none;
-    font-weight: 500;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    border: 1px solid <?php echo htmlspecialchars($primaryColor); ?>;
-    transition: all 0.2s;
-}
-
-.cms-account-login:hover {
-    background: <?php echo htmlspecialchars($primaryColor); ?>;
-    color: white !important;
-}
-
-.cms-cart-badge {
-    background: #ef4444;
-    color: white;
-    border-radius: 50%;
-    padding: 0.125rem 0.5rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    min-width: 1.25rem;
-    text-align: center;
-}
-
-.cms-mobile-menu-toggle {
-    display: none;
-    flex-direction: column;
-    gap: 4px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.5rem;
-}
-
-.cms-mobile-menu-toggle span {
-    width: 24px;
-    height: 2px;
-    background: <?php echo htmlspecialchars($headerTextColor); ?>;
-    transition: all 0.3s;
-}
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-    .cms-primary-nav {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        background: <?php echo htmlspecialchars($headerBg); ?>;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.3s;
-    }
-    
-    .cms-primary-nav.active {
-        max-height: 500px;
-    }
-    
-    .cms-nav-menu {
-        flex-direction: column;
-        gap: 0;
-        padding: 1rem;
-        align-items: stretch;
-    }
-    
-    .cms-nav-link {
-        padding: 1rem;
-        border-bottom: 1px solid rgba(0,0,0,0.1);
-    }
-    
-    .cms-mobile-menu-toggle {
-        display: flex;
-    }
-    
-    .cms-cart-text, .cms-account-name {
-        display: none;
-    }
-    
-    .cms-account-menu {
-        right: auto;
-        left: 0;
-    }
-}
-
-/* Ensure header persists on all pages */
-body {
-    padding-top: 0 !important;
-}
-
-/* Prevent page content from going under header */
-main, .cms-content, .container {
-    margin-top: 0 !important;
-}
-</style>
-
-<script>
-// Mobile menu toggle
-document.addEventListener('DOMContentLoaded', function() {
-    const toggle = document.querySelector('.cms-mobile-menu-toggle');
-    const nav = document.querySelector('.cms-primary-nav');
-    
-    if (toggle && nav) {
-        toggle.addEventListener('click', function() {
-            nav.classList.toggle('active');
-            toggle.classList.toggle('active');
-        });
-        
-        // Close menu when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!nav.contains(e.target) && !toggle.contains(e.target)) {
-                nav.classList.remove('active');
-                toggle.classList.remove('active');
-            }
-        });
-    }
-});
-
-// Account dropdown toggle
-function toggleAccountDropdown() {
-    const dropdown = document.querySelector('.cms-account-dropdown');
-    if (dropdown) {
-        dropdown.classList.toggle('active');
-    }
-}
-
-// Close account dropdown when clicking outside
-document.addEventListener('click', function(e) {
-    const dropdown = document.querySelector('.cms-account-dropdown');
-    if (dropdown && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('active');
-    }
-});
-</script>
-<?php } ?>
 

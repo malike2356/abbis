@@ -16,7 +16,7 @@ $format = $_GET['format'] ?? 'csv';
 
 // Collect filters from GET parameters
 $filters = [];
-$filterKeys = ['date_from', 'date_to', 'rig_id', 'client_id', 'worker', 'role', 'payment_status', 'report_id', 'material_type'];
+$filterKeys = ['date_from', 'date_to', 'rig_id', 'client_id', 'worker', 'role', 'payment_status', 'report_id', 'material_type', 'group_by', 'job_type'];
 foreach ($filterKeys as $key) {
     if (isset($_GET[$key])) {
         $filters[$key] = $_GET[$key];

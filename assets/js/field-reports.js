@@ -16,7 +16,16 @@ class FieldReportsManager {
         };
         this.suggestedWorkers = []; // Workers suggested for current rig
         this.currentRigId = null;
+        this.posStores = Array.isArray(window.POS_STORES) ? window.POS_STORES : [];
+        this.currency = window.SYSTEM_CURRENCY || 'GHS'; // Get currency from system config
         this.init();
+    }
+    
+    /**
+     * Get currency symbol/code from system configuration
+     */
+    getCurrency() {
+        return this.currency || window.SYSTEM_CURRENCY || 'GHS';
     }
 
     async init() {
@@ -264,7 +273,7 @@ class FieldReportsManager {
                 
                 if (jobType.value === 'direct') {
                     contractSumGroup.style.display = 'block';
-                    if (contractSumLabel) contractSumLabel.textContent = 'Full Contract Sum (GHS) *';
+                    if (contractSumLabel) contractSumLabel.textContent = 'Full Contract Sum (' + this.getCurrency() + ') *';
                     document.getElementById('contract_sum').required = true;
                 } else {
                     contractSumGroup.style.display = 'none';
@@ -296,6 +305,13 @@ class FieldReportsManager {
         
         // Real-time calculations
         document.addEventListener('input', (e) => this.handleRealTimeCalculation(e));
+
+        const materialsProviderSelect = document.getElementById('materials_provided_by');
+        if (materialsProviderSelect) {
+            materialsProviderSelect.addEventListener('change', () => this.handleMaterialsProviderChange());
+        }
+        this.populateStoreOptions();
+        this.handleMaterialsProviderChange();
         
         // Form submission
         const form = document.getElementById('fieldReportForm');
@@ -340,6 +356,13 @@ class FieldReportsManager {
         // Materials value calculation when materials provider changes
         if (target.id === 'materials_provided_by') {
             this.calculateMaterialsValue();
+            this.handleMaterialsProviderChange();
+            this.updateMaterialsCostInfo();
+        }
+        
+        // Update cost info when job type changes
+        if (target.id === 'job_type') {
+            this.updateMaterialsCostInfo();
         }
         
         // Financial calculations
@@ -479,6 +502,155 @@ class FieldReportsManager {
         }
     }
 
+    populateStoreOptions() {
+        const storeSelect = document.getElementById('materials_store_id');
+        if (!storeSelect) {
+            return;
+        }
+
+        const existingValue = storeSelect.value;
+        storeSelect.innerHTML = '<option value="">Select Store</option>';
+
+        this.posStores.forEach(store => {
+            const option = document.createElement('option');
+            option.value = store.id;
+            option.textContent = `${store.store_name} (${store.store_code})`;
+            storeSelect.appendChild(option);
+        });
+
+        if (existingValue) {
+            storeSelect.value = existingValue;
+        }
+    }
+
+    handleMaterialsProviderChange() {
+        const providerSelect = document.getElementById('materials_provided_by');
+        const storeGroup = document.getElementById('materials_store_group');
+        const storeSelect = document.getElementById('materials_store_id');
+
+        if (!providerSelect || !storeGroup) {
+            return;
+        }
+
+        const providerValue = providerSelect.value;
+        const useShop = providerValue === 'company_shop'; // Company (Shop/POS)
+        const useStore = providerValue === 'company_store'; // Company (Store/Warehouse)
+        
+        // Show store select only for Company (Shop/POS)
+        storeGroup.style.display = useShop ? 'block' : 'none';
+        
+        // For Company (Store/Warehouse), load Material Store inventory
+        if (useStore) {
+            this.loadMaterialStoreStock();
+        } else {
+            const stockInfo = document.getElementById('store_stock_info');
+            if (stockInfo) stockInfo.style.display = 'none';
+        }
+
+        if (storeSelect) {
+            if (useShop) {
+                storeSelect.setAttribute('required', 'required');
+                // Load stock for selected store if one is already selected
+                if (storeSelect.value) {
+                    this.loadStoreStock(storeSelect.value);
+                }
+            } else {
+                storeSelect.removeAttribute('required');
+                storeSelect.value = '';
+                const stockInfo = document.getElementById('store_stock_info');
+                if (stockInfo) stockInfo.style.display = 'none';
+            }
+        }
+    }
+    
+    async loadMaterialStoreStock() {
+        try {
+            const response = await fetch('api/material-store-transfer.php?action=get_inventory', {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            if (!data.success || !data.inventory) return;
+            
+            // Show Material Store stock info
+            const stockInfo = document.getElementById('store_stock_info');
+            const stockDetails = document.getElementById('store_stock_details');
+            
+            if (!stockInfo || !stockDetails) return;
+            
+            let html = '<div style="color: #10b981; font-weight: 600; margin-bottom: 8px;">📦 Material Store Stock:</div>';
+            
+            data.inventory.forEach(item => {
+                const qty = parseFloat(item.quantity_remaining || 0);
+                const materialName = item.material_name || item.material_type;
+                html += `<div style="margin-top: 4px;">
+                    <strong>${materialName}:</strong> 
+                    <span style="color: ${qty > 0 ? '#10b981' : 'var(--danger)'}; font-weight: 600;">
+                        ${qty.toFixed(0)} units
+                    </span>
+                </div>`;
+            });
+            
+            stockDetails.innerHTML = html;
+            stockInfo.style.display = 'block';
+        } catch (error) {
+            console.error('Error loading Material Store stock:', error);
+        }
+    }
+    
+    async loadStoreStock(storeId) {
+        if (!storeId) {
+            const stockInfo = document.getElementById('store_stock_info');
+            if (stockInfo) stockInfo.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`pos/api/store-stock.php?store_id=${storeId}`);
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            if (!data.success || !data.stock) return;
+            
+            const stockDetails = document.getElementById('store_stock_details');
+            const stockInfo = document.getElementById('store_stock_info');
+            
+            if (!stockDetails || !stockInfo) return;
+            
+            // Filter for materials (screen_pipe, plain_pipe, gravel)
+            const materials = data.stock.filter(item => {
+                const name = (item.product_name || '').toLowerCase();
+                return name.includes('screen') || name.includes('plain') || name.includes('pipe') || name.includes('gravel');
+            });
+            
+            if (materials.length === 0) {
+                stockInfo.style.display = 'none';
+                return;
+            }
+            
+            let html = '';
+            materials.forEach(item => {
+                const qty = parseFloat(item.quantity_on_hand || 0);
+                html += `<div style="margin-top: 4px;">
+                    <strong>${item.product_name || 'Unknown'}:</strong> 
+                    <span style="color: ${qty > 0 ? 'var(--success)' : 'var(--danger)'};">
+                        ${qty.toFixed(0)} units
+                    </span>
+                </div>`;
+            });
+            
+            stockDetails.innerHTML = html;
+            stockInfo.style.display = 'block';
+        } catch (error) {
+            console.error('Error loading store stock:', error);
+        }
+    }
+
     async calculateMaterialsValue() {
         // Calculate value of remaining materials based on quantity and cost
         // Only calculate when materials are provided by company (assets)
@@ -493,12 +665,12 @@ class FieldReportsManager {
         const gravelReceivedEl = document.getElementById('gravel_received');
         const gravelUsedEl = document.getElementById('gravel_used');
         
-        const screenPipesReceived = screenPipesReceivedEl ? parseInt(screenPipesReceivedEl.value) || 0 : 0;
-        const screenPipesUsed = screenPipesUsedEl ? parseInt(screenPipesUsedEl.value) || 0 : 0;
-        const plainPipesReceived = plainPipesReceivedEl ? parseInt(plainPipesReceivedEl.value) || 0 : 0;
-        const plainPipesUsed = plainPipesUsedEl ? parseInt(plainPipesUsedEl.value) || 0 : 0;
-        const gravelReceived = gravelReceivedEl ? parseInt(gravelReceivedEl.value) || 0 : 0;
-        const gravelUsed = gravelUsedEl ? parseInt(gravelUsedEl.value) || 0 : 0;
+        const screenPipesReceived = screenPipesReceivedEl ? parseFloat(screenPipesReceivedEl.value) || 0 : 0;
+        const screenPipesUsed = screenPipesUsedEl ? parseFloat(screenPipesUsedEl.value) || 0 : 0;
+        const plainPipesReceived = plainPipesReceivedEl ? parseFloat(plainPipesReceivedEl.value) || 0 : 0;
+        const plainPipesUsed = plainPipesUsedEl ? parseFloat(plainPipesUsedEl.value) || 0 : 0;
+        const gravelReceived = gravelReceivedEl ? parseFloat(gravelReceivedEl.value) || 0 : 0;
+        const gravelUsed = gravelUsedEl ? parseFloat(gravelUsedEl.value) || 0 : 0;
         
         const screenPipesRemaining = Math.max(0, screenPipesReceived - screenPipesUsed);
         const plainPipesRemaining = Math.max(0, plainPipesReceived - plainPipesUsed);
@@ -513,7 +685,8 @@ class FieldReportsManager {
         if (plainPipesRemainingEl) plainPipesRemainingEl.value = plainPipesRemaining;
         if (gravelRemainingEl) gravelRemainingEl.value = gravelRemaining;
         
-        if (materialsProvidedBy !== 'company') {
+        // Only calculate value for company-provided materials (shop or store)
+        if (materialsProvidedBy !== 'company_shop' && materialsProvidedBy !== 'company_store') {
             const materialsValueField = document.getElementById('materials_value');
             if (materialsValueField) {
                 materialsValueField.value = 0;
@@ -528,53 +701,91 @@ class FieldReportsManager {
         
         let totalValue = 0;
         
-        // Map material types to form field names (accounting for plural forms)
-        const materialFieldMap = {
-            'screen_pipe': 'screen_pipes',
-            'plain_pipe': 'plain_pipes',
-            'gravel': 'gravel'
-        };
+        // Direct calculation using known material types
+        const materials = [
+            { type: 'screen_pipe', field: 'screen_pipes', remaining: screenPipesRemaining },
+            { type: 'plain_pipe', field: 'plain_pipes', remaining: plainPipesRemaining },
+            { type: 'gravel', field: 'gravel', remaining: gravelRemaining }
+        ];
         
-        for (const material of this.configData.materials || []) {
-            const materialType = material.material_type || '';
-            const fieldBase = materialFieldMap[materialType] || materialType;
+        for (const mat of materials) {
+            // Find material in config data
+            const material = (this.configData.materials || []).find(m => 
+                (m.material_type || '').toLowerCase() === mat.type.toLowerCase()
+            );
             
-            // Get values directly from DOM elements
-            const receivedEl = document.getElementById(`${fieldBase}_received`);
-            const usedEl = document.getElementById(`${fieldBase}_used`);
-            const received = receivedEl ? parseInt(receivedEl.value) || 0 : 0;
-            const used = usedEl ? parseInt(usedEl.value) || 0 : 0;
-            const remaining = received - used;
-            const unitCost = parseFloat(material.unit_cost) || 0;
-            
-            // Debug log (remove in production)
-            console.log('Material Value Calculation:', {
-                materialType,
-                fieldBase,
-                received,
-                used,
-                remaining,
-                unitCost,
-                value: remaining * unitCost
-            });
-            
-            // Only add value for remaining materials (assets)
-            if (remaining > 0 && unitCost > 0) {
-                totalValue += remaining * unitCost;
+            if (material && mat.remaining > 0) {
+                // Get unit cost from material config
+                const unitCost = parseFloat(material.unit_cost) || parseFloat(material.cost) || 0;
+                
+                if (unitCost > 0) {
+                    const materialValue = mat.remaining * unitCost;
+                    totalValue += materialValue;
+                    
+                    console.log(`Material Value: ${mat.type}`, {
+                        remaining: mat.remaining,
+                        unitCost: unitCost,
+                        value: materialValue
+                    });
+                } else {
+                    console.warn(`No unit cost found for ${mat.type}`);
+                }
             }
         }
         
         const materialsValueField = document.getElementById('materials_value');
         if (materialsValueField) {
-            materialsValueField.value = parseFloat(totalValue.toFixed(2));
-            // Update summary display
+            const finalValue = parseFloat(totalValue.toFixed(2));
+            materialsValueField.value = finalValue;
+            
+            // Update summary display if it exists
             const summaryField = document.getElementById('materials_value_summary');
             if (summaryField) {
-                summaryField.textContent = 'GHS ' + totalValue.toFixed(2);
+                summaryField.textContent = this.getCurrency() + ' ' + finalValue.toFixed(2);
             }
         }
         
-        console.log('Total Materials Value:', totalValue);
+        console.log('Total Materials Value (Assets):', totalValue);
+        
+        // Update materials cost info
+        this.updateMaterialsCostInfo();
+    }
+    
+    updateMaterialsCostInfo() {
+        const jobTypeEl = document.getElementById('job_type');
+        const materialsProvidedByEl = document.getElementById('materials_provided_by');
+        const infoRow = document.getElementById('materials_cost_info_row');
+        const infoDiv = document.getElementById('materials_cost_info');
+        
+        if (!jobTypeEl || !materialsProvidedByEl || !infoRow || !infoDiv) {
+            return;
+        }
+        
+        const jobType = jobTypeEl.value || 'direct';
+        const materialsProvidedBy = materialsProvidedByEl.value || 'client';
+        const isContractor = jobType === 'subcontract';
+        const isClientMaterials = materialsProvidedBy === 'client';
+        
+        let message = '';
+        let showInfo = false;
+        
+        if (isContractor && isClientMaterials) {
+            message = '⚠️ Materials provided by contractor will <strong>NOT</strong> be included in cost calculation or receipt.';
+            showInfo = true;
+        } else if (isContractor && !isClientMaterials) {
+            message = '✓ Materials provided by ' + (materialsProvidedBy === 'store' ? 'POS store' : materialsProvidedBy) + ' will be included in cost calculation.';
+            showInfo = true;
+        } else if (!isContractor) {
+            message = '✓ Materials will be included in cost calculation.';
+            showInfo = true;
+        }
+        
+        if (showInfo) {
+            infoDiv.innerHTML = message;
+            infoRow.style.display = 'block';
+        } else {
+            infoRow.style.display = 'none';
+        }
     }
 
     calculateFinancialTotals() {
@@ -840,9 +1051,10 @@ class FieldReportsManager {
             .then(res => {
                 if (!res.success) return;
                 const items = res.data || [];
+                const currency = this.getCurrency();
                 sel.innerHTML = '<option value="">— Select from Catalog —</option>' + items.map(it => {
                     const price = Number(it.sell_price || 0).toFixed(2);
-                    const label = `${it.name} (GHS ${price})`;
+                    const label = `${it.name} (${currency} ${price})`;
                     return `<option value="${it.id}" data-name="${it.name.replace(/"/g,'&quot;')}" data-unit="${it.unit || ''}" data-price="${it.sell_price}" data-cost="${it.cost_price}" data-type="${it.item_type}">${label}</option>`;
                 }).join('');
             }).catch(()=>{});
@@ -887,6 +1099,13 @@ class FieldReportsManager {
 
     async handleFormSubmit(e) {
         e.preventDefault();
+        const materialsProvider = document.getElementById('materials_provided_by')?.value;
+        const materialsStoreSelect = document.getElementById('materials_store_id');
+        if (materialsProvider === 'store' && materialsStoreSelect && !materialsStoreSelect.value) {
+            this.showNotification('error', 'Select the POS store that supplied materials.', true);
+            materialsStoreSelect.focus();
+            return;
+        }
         
         const form = e.target;
         const submitBtn = form.querySelector('button[type="submit"]');

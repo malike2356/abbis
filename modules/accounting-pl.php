@@ -1,15 +1,24 @@
 <?php
+require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+$auth->requirePermission('finance.access');
+
 $pdo = getDBConnection();
 // Sum revenue and expenses from journal against account types
 function sumByType($pdo, $type) {
     try {
         $stmt = $pdo->prepare("SELECT 
-            SUM(CASE WHEN c.account_type='Revenue' THEN (jl.credit - jl.debit) ELSE (jl.debit - jl.credit) END) as amount
+            COALESCE(SUM(CASE WHEN c.account_type='Revenue' THEN (jl.credit - jl.debit) ELSE (jl.debit - jl.credit) END), 0) as amount
             FROM chart_of_accounts c
             LEFT JOIN journal_entry_lines jl ON jl.account_id = c.id
             WHERE c.account_type = ?");
         $stmt->execute([$type]);
-        return (float)($stmt->fetchColumn() ?: 0);
+        $result = $stmt->fetchColumn();
+        return (float)($result ?? 0);
     } catch (PDOException $e) { return 0; }
 }
 $revenue = sumByType($pdo,'Revenue');

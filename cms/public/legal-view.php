@@ -18,9 +18,11 @@ $legalSlug = $_GET['slug'] ?? '';
 if (empty($legalSlug)) {
     $requestUri = $_SERVER['REQUEST_URI'] ?? '';
     $requestUri = strtok($requestUri, '?'); // Remove query string
-    
-    // Handle both /abbis3.2/cms/legal/slug and /cms/legal/slug
-    $requestUri = preg_replace('#^/abbis3.2#', '', $requestUri);
+
+    $basePath = app_base_path();
+    if ($basePath) {
+        $requestUri = preg_replace('#^' . preg_quote($basePath, '#') . '#', '', $requestUri);
+    }
     $requestUri = trim($requestUri, '/');
     
     // Extract slug from cms/legal/slug pattern
@@ -78,7 +80,6 @@ $primaryColor = $themeConfig['primary_color'] ?? '#0ea5e9';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($siteTitle); ?></title>
-    <?php include __DIR__ . '/header.php'; ?>
     <style>
         .legal-document { max-width: 900px; margin: 0 auto; padding: 2rem; background: white; }
         .legal-header { border-bottom: 2px solid #e5e7eb; padding-bottom: 1.5rem; margin-bottom: 2rem; }

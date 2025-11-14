@@ -10,6 +10,7 @@ require_once '../includes/auth.php';
 require_once '../includes/helpers.php';
 
 $auth->requireAuth();
+$auth->requirePermission('resources.access');
 $pdo = getDBConnection();
 
 $poId = intval($_GET['id'] ?? 0);

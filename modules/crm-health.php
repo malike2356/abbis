@@ -5,6 +5,7 @@ require_once '../config/security.php';
 require_once '../includes/auth.php';
 require_once '../includes/helpers.php';
 $auth->requireAuth();
+$auth->requirePermission('crm.access');
 $pdo = getDBConnection();
 require_once '../includes/header.php';
 ?>

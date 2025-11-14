@@ -39,12 +39,15 @@ function initSecureSession() {
     }
     
     if (session_status() === PHP_SESSION_NONE) {
-        // Secure session configuration
-        ini_set('session.cookie_httponly', '1');
-        ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) ? '1' : '0');
-        ini_set('session.cookie_samesite', 'Strict');
-        ini_set('session.use_strict_mode', '1');
-        ini_set('session.cookie_lifetime', 0); // Session cookie
+        // Only set ini settings if headers haven't been sent
+        if (!headers_sent()) {
+            // Secure session configuration
+            @ini_set('session.cookie_httponly', '1');
+            @ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) ? '1' : '0');
+            @ini_set('session.cookie_samesite', 'Strict');
+            @ini_set('session.use_strict_mode', '1');
+            @ini_set('session.cookie_lifetime', '0'); // Session cookie
+        }
         
         session_start();
         

@@ -12,6 +12,7 @@ require_once '../includes/helpers.php';
 require_once '../includes/pagination.php';
 
 $auth->requireAuth();
+$auth->requirePermission('field_reports.manage');
 
 // Handle search and filters
 $search = sanitizeInput($_GET['search'] ?? '');
@@ -172,15 +173,23 @@ require_once '../includes/header.php';
                     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <small style="margin-right: 8px;">Showing <?php echo count($reports); ?> of <?php echo number_format($totalItems); ?></small>
                         <div class="export-buttons" style="display: flex; gap: 6px;">
-                            <a href="export.php?module=reports&format=csv<?php echo !empty($rig_id) ? '&rig_id=' . $rig_id : ''; ?><?php echo !empty($start_date) ? '&date_from=' . urlencode($start_date) : ''; ?><?php echo !empty($end_date) ? '&date_to=' . urlencode($end_date) : ''; ?>" 
+                            <?php
+                            $exportParams = ['module' => 'reports', 'format' => 'csv'];
+                            if (!empty($rig_id)) $exportParams['rig_id'] = $rig_id;
+                            if (!empty($start_date)) $exportParams['date_from'] = $start_date;
+                            if (!empty($end_date)) $exportParams['date_to'] = $end_date;
+                            ?>
+                            <a href="<?php echo api_url('export.php', $exportParams); ?>" 
                                class="btn btn-sm btn-outline" title="Export as CSV">
                                 📥 CSV
                             </a>
-                            <a href="export.php?module=reports&format=excel<?php echo !empty($rig_id) ? '&rig_id=' . $rig_id : ''; ?><?php echo !empty($start_date) ? '&date_from=' . urlencode($start_date) : ''; ?><?php echo !empty($end_date) ? '&date_to=' . urlencode($end_date) : ''; ?>" 
+                            <?php $exportParams['format'] = 'excel'; ?>
+                            <a href="<?php echo api_url('export.php', $exportParams); ?>" 
                                class="btn btn-sm btn-outline" title="Export as Excel">
                                 📊 Excel
                             </a>
-                            <a href="export.php?module=reports&format=pdf<?php echo !empty($rig_id) ? '&rig_id=' . $rig_id : ''; ?><?php echo !empty($start_date) ? '&date_from=' . urlencode($start_date) : ''; ?><?php echo !empty($end_date) ? '&date_to=' . urlencode($end_date) : ''; ?>" 
+                            <?php $exportParams['format'] = 'pdf'; ?>
+                            <a href="<?php echo api_url('export.php', $exportParams); ?>" 
                                class="btn btn-sm btn-outline" title="Export as PDF" target="_blank">
                                 📄 PDF
                             </a>

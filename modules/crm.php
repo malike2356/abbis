@@ -14,17 +14,32 @@ require_once '../includes/tab-navigation.php';
 require_once '../includes/module-router.php';
 
 $auth->requireAuth();
+$auth->requirePermission('crm.access');
+
+// Check for standalone mode BEFORE including header (for customer statement printing)
+// If standalone, include the statement page directly and exit
+if (isset($_GET['action']) && $_GET['action'] === 'customer-statement' && isset($_GET['standalone'])) {
+    require_once __DIR__ . '/crm-customer-statement.php';
+    exit;
+}
 
 $pdo = getDBConnection();
 // Default action should be dashboard (overview first)
-$action = getCurrentAction('dashboard'); 
+$action = getCurrentAction('dashboard');
 $clientId = intval($_GET['client_id'] ?? 0);
+
+if ($action === 'complaints') {
+    redirect('complaints.php');
+}
 
 // Define tabs - Dashboard first for overview, then main functionality
 $tabs = [
     'dashboard' => '📊 Dashboard',
     'clients' => '👥 Clients',
     'followups' => '📅 Follow-ups',
+    'complaints' => '⚠️ Complaints',
+    'quote-requests' => '💰 Quote Requests',
+    'rig-requests' => '🚛 Rig Requests',
     'emails' => '📧 Emails',
     'templates' => '📝 Templates',
 ];
@@ -111,9 +126,12 @@ document.addEventListener('DOMContentLoaded', function(){
         'dashboard' => __DIR__ . '/crm-dashboard.php',
         'clients' => __DIR__ . '/crm-clients.php',
         'followups' => __DIR__ . '/crm-followups.php',
+        'quote-requests' => __DIR__ . '/requests.php',
+        'rig-requests' => __DIR__ . '/requests.php',
         'emails' => __DIR__ . '/crm-emails.php',
         'templates' => __DIR__ . '/crm-templates.php',
         'client-detail' => __DIR__ . '/crm-client-detail.php',
+        'customer-statement' => __DIR__ . '/crm-customer-statement.php',
     ];
     
     // Add health route if feature enabled
@@ -124,15 +142,27 @@ document.addEventListener('DOMContentLoaded', function(){
     
     // Use ModuleRouter
     // Pass variables from current scope to make them available in included files
+    // For requests pages, also pass type parameter
+    $vars = [
+        'auth' => $auth,
+        'pdo' => $pdo,
+        'action' => $action,
+        'clientId' => $clientId,
+        'currentUserId' => $currentUserId,
+        'page_title' => $page_title
+    ];
+    
+    // Set type parameter for requests pages
+    if ($action === 'quote-requests') {
+        $_GET['type'] = 'quote';
+        $vars['type'] = 'quote';
+    } elseif ($action === 'rig-requests') {
+        $_GET['type'] = 'rig';
+        $vars['type'] = 'rig';
+    }
+    
     try {
-        ModuleRouter::route('crm', $routes, 'dashboard', 'action', [
-            'auth' => $auth,
-            'pdo' => $pdo,
-            'action' => $action,
-            'clientId' => $clientId,
-            'currentUserId' => $currentUserId,
-            'page_title' => $page_title
-        ]);
+        ModuleRouter::route('crm', $routes, 'dashboard', 'action', $vars);
     } catch (Exception $e) {
         echo '<div class="alert alert-danger">Error loading CRM view: ' . htmlspecialchars($e->getMessage()) . '</div>';
         error_log("CRM routing error: " . $e->getMessage());

@@ -1,6 +1,12 @@
 <?php
 $page_title = 'Service Level Agreement (SLA)';
 require_once '../config/app.php';
+require_once '../config/security.php';
+require_once '../includes/auth.php';
+require_once '../includes/helpers.php';
+
+$auth->requireAuth();
+
 require_once '../includes/header.php';
 ?>
 

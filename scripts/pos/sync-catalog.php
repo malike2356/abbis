@@ -21,7 +21,8 @@ try {
             } elseif (($res['status'] ?? '') === 'disabled') {
                 echo "Disabled catalog link for product {$res['product_id']} (item {$res['catalog_item_id']})" . PHP_EOL;
             } else {
-                echo "Skipped product {$res['product_id']} ({$res['reason'] ?? 'no action'})" . PHP_EOL;
+                $reason = $res['reason'] ?? 'no action';
+                echo "Skipped product {$res['product_id']} ({$reason})" . PHP_EOL;
             }
         }
     }

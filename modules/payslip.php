@@ -523,7 +523,13 @@ $worker = $workerStmt->fetch(PDO::FETCH_ASSOC);
         }
         
         .no-print {
-            /* This class will be hidden when printing */
+            display: none;
+        }
+        
+        @media print {
+            .no-print {
+                display: none !important;
+            }
         }
         
         .print-actions {
